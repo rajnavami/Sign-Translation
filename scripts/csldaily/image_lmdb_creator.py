@@ -49,6 +49,11 @@ env = lmdb.open(path=str(tmp_dir), map_size=n_bytes)
 txn = env.begin(write=True)
 
 cap = cv2.VideoCapture(video_path)
+# print("Opening video:", video_path)
+# if not cap.isOpened():
+#     print("Failed to open video")
+# else:
+#     print("Video opened successfully")
 
 if lmdb_dir.exists() and lmdb_dir.is_dir():
     exit()
