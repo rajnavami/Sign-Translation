@@ -157,6 +157,10 @@ run_submit.sh
 test.py
 
 checkpoints/
+checkpoint/
+checkpoint_dinov2/
+checkpoint_dinov3/
+logs/
 vis_images/
 old/
 *.pkl
@@ -173,3 +177,4 @@ docker_stderror
 *.mp4
 *.ipynb
 file_names/
+*.pth
