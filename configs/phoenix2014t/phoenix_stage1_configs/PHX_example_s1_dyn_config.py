@@ -5,6 +5,7 @@ import json
 import numpy as np
 import torch
 from configs.base.base_utils import *
+from loguru import logger
 
 
 def get_config():
@@ -12,10 +13,12 @@ def get_config():
     cfg.name = Path(os.path.realpath(__file__)).stem
     base_name = Path(os.path.realpath(__file__)).parent.name
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
+    logger.info(f"code_path: {code_path}")
 
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
+    logger.info(f"lmdb_path: {lmdb_path}")
 
     cfg.main_runner = "trainer.psuedo_gloss_trainer"
     cfg.project_name = "final_phoenix2014t_pretrain"
@@ -94,6 +97,7 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": False,
         },
         "shuffle": True,
@@ -110,6 +114,7 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
         },
         "shuffle": False,
@@ -126,6 +131,7 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
         },
         "shuffle": False,
@@ -142,7 +148,7 @@ def get_config():
     post_params = {
         "in_dim": dim_model,
         "hidden_dim": 300,
-        "num_classes": 2306, # NOTE: if using the config in github release pkl then num classes is 2533, spacy seems to have changed something
+        "num_classes": 2330,    #old value: 2306, udpated as .pkl file has 2330 classes # NOTE: if using the config in github release pkl then num classes is 2533, spacy seems to have changed something
         "dropout": 0.2,
         "class_temperature": 0.1,
         "time_temperature": 0.1,

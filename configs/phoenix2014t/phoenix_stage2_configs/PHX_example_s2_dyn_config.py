@@ -34,7 +34,7 @@ def get_config():
         "max_seq_len": 256,
     }
 
-    base_bs = 8
+    base_bs = 8    #batch
     cfg.bs = int(
         8
         * torch.cuda.device_count()
