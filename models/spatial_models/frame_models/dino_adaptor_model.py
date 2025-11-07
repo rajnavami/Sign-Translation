@@ -1,7 +1,9 @@
 import torch
 from torch import nn
-from models.dinov2.model.vision_transformer import *
+from models.dinov3.model.vision_transformer import *
+# from models.dinov2.model.vision_transformer import *
 import ignite.distributed as idist
+from loguru import logger
 
 class Model(nn.Module):
     def __init__(
@@ -17,7 +19,7 @@ class Model(nn.Module):
         self.spatial_model = vit_small(
             img_size=518,
             init_values=1.0,
-            patch_size=14,
+            patch_size=16,  # 14
             block_chunks=0,
             adaptor_layers=adaptor_layers,
             adapt_params=adapt_params,
@@ -29,6 +31,8 @@ class Model(nn.Module):
         self.lin = torch.nn.Linear(num_features, out_dim)
         self.bn = torch.nn.BatchNorm1d(out_dim)
 
+        logger.info(f"ckpt_dir: {ckpt_dir}")
+
         if idist.get_local_rank() == 0 or idist.get_world_size() == 0:
             if not os.path.isfile("/tmp/tmp.pth"):
                 r = requests.get(ckpt_dir)
@@ -36,8 +40,11 @@ class Model(nn.Module):
 
         if idist.get_world_size() > 0:
             idist.barrier()
+        # dict_additional = self.spatial_model.load_state_dict(
+        #     torch.load("/tmp/tmp.pth", map_location="cpu"), strict=False
+        # )
         dict_additional = self.spatial_model.load_state_dict(
-            torch.load("/tmp/tmp.pth", map_location="cpu"), strict=False
+            torch.load(ckpt_dir, map_location="cpu"), strict=False
         )
 
         for name, param in self.spatial_model.named_parameters():

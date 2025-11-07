@@ -9,7 +9,8 @@ def get_sign_encoder():
     sign_model_params = {
         "spatial_name": "models.spatial_models.frame_models.dino_adaptor_model",
         "spatial_params": {
-            "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
+            # "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
+            "ckpt_dir": "/data/sign2gpt/Sign2GPT/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
             "trainable_names": [],
             "adaptor_layers": list(np.arange(9, 12, 1)),
             "adapt_params": {
