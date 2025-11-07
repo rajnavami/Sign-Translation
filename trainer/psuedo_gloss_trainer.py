@@ -1,3 +1,4 @@
+import datetime
 import torch
 
 import ignite.distributed as idist
@@ -21,7 +22,8 @@ class Trainer(BaseTrainer):
         if "run" in cfg:
             pass
         else:
-            self.logger = LoggingCallback(self.cfg)
+            stage_name = "pretraining_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.logger = LoggingCallback(self.cfg, stage_name)
             self.logger.start_logger()
 
         self.max_length = 128
