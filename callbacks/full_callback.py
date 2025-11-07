@@ -10,15 +10,23 @@ import torch
 import io
 import pickle
 from pathlib import Path
+import datetime
 
 
 class LoggingCallback:
-    def __init__(self, cfg):
-        self.cfg = cfg
 
-    def start_logger(
-        self,
-    ):
+    def __init__(self, cfg, stage):
+        self.cfg = cfg
+        Path("logs").mkdir(parents=True, exist_ok=True)
+        
+        self.log_file_path = f"logs/training_{stage}_log.txt"
+
+        if not os.path.exists(self.log_file_path) or os.path.getsize(self.log_file_path) == 0:
+            with open(self.log_file_path, "a") as f:
+                f.write(f"=== Training Log Started at {datetime.datetime.now()} ===\n\n")
+
+
+    def start_logger(self):
         from environment_variables import CONFIG
 
         for key, value in CONFIG.items():
@@ -78,7 +86,6 @@ class LoggingCallback:
                     img=None,
                 )
 
-
             if "text" in self.cfg.logger_name and idist.get_rank() == 0:
                 print("TRAINER", engine.state.epoch)
                 dict_res = {}
@@ -93,6 +100,13 @@ class LoggingCallback:
 
                 pprint.pprint(dict_res)
 
+                ##
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"\n[TRAIN EPOCH {engine.state.epoch}]\n")
+                    pprint.pprint(dict_res, stream=f)
+                    f.write("\n")
+                ##
+
         @trainer.on(Events.EPOCH_COMPLETED(every=1))
         def print_lr(engine):
             for i, pg in enumerate(optimizer.param_groups):
@@ -104,7 +118,12 @@ class LoggingCallback:
                         }
                     )
                 if "text" in self.cfg.logger_name and idist.get_rank() == 0:
-                    pprint.pprint({f"train/lr_{i}": optimizer.param_groups[i]["lr"]})
+                    lr_val = optimizer.param_groups[i]["lr"]
+                    pprint.pprint({f"train/lr_{i}": lr_val})
+                    ##
+                    with open(self.log_file_path, "a") as f:
+                        f.write(f"LR (group {i}): {lr_val}\n")
+                    ##
 
     def on_train_iteration(self, trainer, model, scaler):
         @trainer.on(Events.ITERATION_COMPLETED(every=self.cfg.log_every))
@@ -124,12 +143,17 @@ class LoggingCallback:
                             {f"{k}": v, f"global_step": engine.state.iteration}
                         )
             if "text" in self.cfg.logger_name and idist.get_rank() == 0:
-                pprint.pprint(
-                    {
-                        **engine.state.output["losses"],
-                        f"global_step": engine.state.iteration,
-                    }
-                )
+                log_dict = {
+                    **engine.state.output["losses"],
+                    f"global_step": engine.state.iteration,
+                }
+                pprint.pprint(log_dict)
+                ##
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"[ITER {engine.state.iteration}] ")
+                    pprint.pprint(log_dict, stream=f)
+                    f.write("\n")
+                ##
 
         @trainer.on(Events.ITERATION_COMPLETED(every=self.cfg.log_every))
         def log_gradients(engine):
@@ -164,20 +188,30 @@ class LoggingCallback:
                 and idist.get_rank() == 0
                 and scaler is not None
             ):
-                pprint.pprint(
-                    {
-                        f"gradients": gradients,
-                        f"scaler": scaler.get_scale(),
-                        f"global_step": engine.state.iteration,
-                    }
-                )
+                log_dict = {
+                    f"gradients": gradients,
+                    f"scaler": scaler.get_scale(),
+                    f"global_step": engine.state.iteration,
+                }
+                pprint.pprint(log_dict)
+                ##
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"[GRAD {engine.state.iteration}] ")
+                    pprint.pprint(log_dict, stream=f)
+                    f.write("\n")
+                ##
             elif "text" in self.cfg.logger_name and idist.get_rank() == 0:
-                pprint.pprint(
-                    {
-                        f"gradients": gradients,
-                        f"global_step": engine.state.iteration,
-                    }
-                )
+                log_dict = {
+                    f"gradients": gradients,
+                    f"global_step": engine.state.iteration,
+                }
+                pprint.pprint(log_dict)
+                ##
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"[GRAD {engine.state.iteration}] ")
+                    pprint.pprint(log_dict, stream=f)
+                    f.write("\n")
+                ##
 
         if (
             "watch_grad" in self.cfg
@@ -250,10 +284,19 @@ class LoggingCallback:
                         dict_res[f"{k}"] = v
 
                 pprint.pprint({"epoch": trainer.state.epoch, **dict_res})
-
+                # --- UPDATED logging ---
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"\n[VALID EPOCH {trainer.state.epoch}]\n")
+                    pprint.pprint({"epoch": trainer.state.epoch, **dict_res}, stream=f)
+                    f.write("\n")
+                # -----------------------
 
     def on_completion(self, trainer):
         @trainer.on(Events.COMPLETED)
         def finish_logging(engine):
             if "wandb" in self.cfg.logger_name and idist.get_rank() == 0:
                 self.writer.finish()
+            ##
+            with open(self.log_file_path, "a") as f:
+                f.write("\n=== TRAINING COMPLETED ===\n")
+            ##

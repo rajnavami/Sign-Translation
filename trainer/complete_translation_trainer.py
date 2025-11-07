@@ -1,3 +1,4 @@
+import datetime
 import torch
 
 import ignite.distributed as idist
@@ -26,7 +27,8 @@ class Trainer(BaseTrainer):
         if "run" in cfg:
             pass
         else:
-            self.logger = LoggingCallback(self.cfg)
+            stage_name = "translation_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.logger = LoggingCallback(self.cfg, stage_name)
             self.logger.start_logger()
 
         if cfg.mixup:
@@ -245,7 +247,7 @@ class Trainer(BaseTrainer):
                 output_transform=text_transform
             )
         if "orouge" in list_of_metrics:
-            from metrics.rouge_metric import RougeMetric
+            from metrics.rouge_score import RougeMetric
 
             def text_transform(x):
                 p_words = []
