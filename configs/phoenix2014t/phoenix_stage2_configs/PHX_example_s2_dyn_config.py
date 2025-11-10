@@ -9,6 +9,7 @@ import importlib
 from train_utils.checkpoint_helpers import (
     get_best_checkpoint_details,
 )
+from loguru import logger
 
 
 def get_config():
@@ -160,6 +161,13 @@ def get_config():
     stage1_ckpt = get_best_checkpoint_details(
         stage1_ckpt_dir, best_checkpoint_name="_result_checkpoint_"
     )[0]
+    logger.info(f"stage1_ckpt: {stage1_ckpt}")
+    logger.info(f"stage1_ckpt_dir: {stage1_ckpt_dir}")
+    stage1_ckpt_dir = "checkpoint/phoenix_stage1_configs/PHX_example_s1_dyn_config"
+    # stage1_ckpt = "checkpoint/phoenix_stage1_configs/PHX_example_s1_dyn_config/best_result_checkpoint_56_0.1713.pt"
+    stage1_ckpt = "/data/sign2gpt/Sign2GPT/dinov2_vits14_pretrain.pth"
+    logger.info(f"stage1_ckpt: {stage1_ckpt}")
+    logger.info(f"stage1_ckpt_dir: {stage1_ckpt_dir}")
     assert stage1_ckpt is not None and stage1_ckpt != ""
     cfg.model_name = "models.trial_models.test_stage2_model"
     cfg.model_params = {
@@ -180,7 +188,7 @@ def get_config():
             "lora_a": 4.0,
             "adapt_tokens": False,
         },
-        "freeze": False,
+        "freeze": False, #change to True to test: (3) extracted features Z from the frozen spatial and sign encoder model that has been trained with pseudo-gloss pretraining (Sign(Z)2GPT(w/PGP))
     }
 
     cfg.gen_params = {"max_length": 64, "temperature": 1.0, "num_beams": 4}

@@ -1,6 +1,7 @@
 from torch import nn
 import importlib
 import torch
+from loguru import logger
 
 class Model(nn.Module):
     def __init__(
@@ -14,15 +15,21 @@ class Model(nn.Module):
         llm_name,
         adaptor_params,
         pretext_length,
-        freeze=False,
+        freeze=False, 
         new_token_length=None,
     ):
         super().__init__()
 
+        logger.info(f"stage1_name: {stage1_name}")
+        logger.info(f"stage1_ckpt: {stage1_ckpt}")
+        logger.info(f"stage1_params: {stage1_params}")
+        # exit(0)
+
         mod = importlib.import_module(stage1_name, package=None)
         self.sign_model = mod.Model(**stage1_params)
-        if stage1_ckpt is not None:
-            self.sign_model.load_state_dict(torch.load(stage1_ckpt,map_location='cpu')['model'])
+        # if stage1_ckpt is not None:
+            # self.sign_model.load_state_dict(torch.load(stage1_ckpt,map_location='cpu')['model'])
+            # self.sign_model.load_state_dict(torch.load(stage1_ckpt,map_location='cpu'))
         self.sign_model.post_model = None
 
         if freeze:

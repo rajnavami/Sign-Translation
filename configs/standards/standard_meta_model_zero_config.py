@@ -10,6 +10,7 @@ def get_sign_encoder():
         "spatial_name": "models.spatial_models.frame_models.dino_adaptor_model",
         "spatial_params": {
             "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
+            # "ckpt_dir": "checkpoint/phoenix_stage1_configs/PHX_example_s1_dyn_config/best_result_checkpoint_56_0.1713.pt",
             "trainable_names": [],
             "adaptor_layers": list(np.arange(9, 12, 1)),
             "adapt_params": {

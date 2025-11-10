@@ -179,5 +179,6 @@ def get_config():
     cfg.score_name = "valid/class_f1_score"
     cfg.bfloat16_only = False
     cfg.mixup = False
+    cfg.include_signcl = True
 
     return cfg

@@ -13,6 +13,7 @@ from train_utils.checkpoint_helpers import (
     get_latest_saved_file,
     get_best_checkpoint_details,
 )
+from losses.SignCL import SignCL
 
 
 class Trainer(BaseTrainer):

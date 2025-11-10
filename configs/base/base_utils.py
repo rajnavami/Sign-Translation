@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def get_checkpoint_path(base_name, name):
-    ckpt_path = "checkpoint"
+    ckpt_path = "checkpoint_Sign2GPT(wo/PGP)"
     return ckpt_path
 
 
