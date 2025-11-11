@@ -11,7 +11,7 @@ from typing import Union
 import torch
 import torch.nn as nn
 
-from dinov3.layers.fp8_linear import convert_linears_to_fp8
+from ..layers.fp8_linear import convert_linears_to_fp8
 
 from . import vision_transformer as vits
 
