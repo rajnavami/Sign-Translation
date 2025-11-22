@@ -13,6 +13,7 @@ from train_utils.checkpoint_helpers import (
     get_latest_saved_file,
     get_best_checkpoint_details,
 )
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Trainer(BaseTrainer):
@@ -22,8 +23,12 @@ class Trainer(BaseTrainer):
         if "run" in cfg:
             pass
         else:
-            stage_name = "pretraining_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.logger = LoggingCallback(self.cfg, stage_name)
+            if cfg.log_name:
+                stage_name = "pretraining_"+cfg.log_name+'_'+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            else:
+                stage_name = "pretraining_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            writer = SummaryWriter('runs/pretraining')
+            self.logger = LoggingCallback(self.cfg, stage_name, writer)
             self.logger.start_logger()
 
         self.max_length = 128

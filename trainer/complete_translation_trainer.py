@@ -18,6 +18,7 @@ from train_utils.checkpoint_helpers import (
     get_best_checkpoint_details,
 )
 from collections import defaultdict
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Trainer(BaseTrainer):
@@ -27,8 +28,12 @@ class Trainer(BaseTrainer):
         if "run" in cfg:
             pass
         else:
-            stage_name = "translation_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.logger = LoggingCallback(self.cfg, stage_name)
+            if cfg.log_name:
+                stage_name = "downstream_"+cfg.log_name+'_'+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            else:
+                stage_name = "downstream_"+datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            writer = SummaryWriter('runs/downstream')
+            self.logger = LoggingCallback(self.cfg, stage_name, writer)
             self.logger.start_logger()
 
         if cfg.mixup:
@@ -157,6 +162,19 @@ class Trainer(BaseTrainer):
             self.evaluator = evaluator
             self.valid_tester = valid_tester
             self.test_tester = test_tester
+            test_tester.run(
+                test_dl, max_epochs=1, epoch_length=None
+            )
+            metrics = test_tester.state.metrics
+            print("metrics", metrics)
+
+            if "test_test/ableu" in metrics:
+                for k, v in metrics["test_test/ableu"].items():
+                    print(f"{k}: {v}")
+        
+            if "test_test/obleu" in metrics:
+                for k, v in metrics["test_test/obleu"].items():
+                    print(f"{k}: {v}")
         else:
             self.prepare_runner(
                 cfg, trainer, evaluator, valid_dl, valid_tester, test_tester, test_dl
