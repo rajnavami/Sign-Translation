@@ -15,6 +15,7 @@ def get_config():
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
+    cfg.log_name = "signcl_maxlen64_margin_org"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -80,6 +81,16 @@ def get_config():
                     },
                     "weight": 10.0,
                 },
+                 "signcl": {
+                    "cls_name": "losses.loss_functions.signcl_loss",
+                    "loss_params": {
+                    "max_distance": 64.0,
+                    "pos_samples": 2,
+                    "neg_samples": 4,
+                    # "margin": 20,
+            },
+                    "weight": 0.01, #0.001
+        },
             }
         }
     )
@@ -169,7 +180,7 @@ def get_config():
     cfg.seed = 1
     cfg.grad_clip_norm = 1.0
     cfg.grad_clip_value = 1.0
-    cfg.logger_name = ["text"]
+    cfg.logger_name = ["text", "tensorboard"]
     cfg.resume = True
     cfg.train_length = None
     cfg.val_length = None
