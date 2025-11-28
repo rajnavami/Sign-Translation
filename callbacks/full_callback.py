@@ -15,10 +15,11 @@ import datetime
 
 class LoggingCallback:
 
-    def __init__(self, cfg, stage):
+    def __init__(self, cfg, stage, writer):
         self.cfg = cfg
         Path("logs").mkdir(parents=True, exist_ok=True)
-        
+
+        self.tensor_writer = writer
         self.log_file_path = f"logs/training_{stage}_log.txt"
 
         if not os.path.exists(self.log_file_path) or os.path.getsize(self.log_file_path) == 0:
@@ -106,6 +107,9 @@ class LoggingCallback:
                     pprint.pprint(dict_res, stream=f)
                     f.write("\n")
                 ##
+                if "tensorboard" in self.cfg.logger_name and idist.get_rank() == 0:
+                    for key, value in dict_res.items():
+                        self.tensor_writer.add_scalar(key, value, engine.state.epoch)
 
         @trainer.on(Events.EPOCH_COMPLETED(every=1))
         def print_lr(engine):
@@ -154,6 +158,14 @@ class LoggingCallback:
                     pprint.pprint(log_dict, stream=f)
                     f.write("\n")
                 ##
+
+                if "tensorboard" in self.cfg.logger_name and idist.get_rank() == 0:
+                    for key, value in engine.state.output["losses"].items():
+                        if isinstance(value, dict):
+                            for k_i, v_i in value.items():
+                                self.tensor_writer.add_scalar(f"{key}_{k_i}", v_i, engine.state.iteration)
+                        else:
+                            self.tensor_writer.add_scalar(key, value, engine.state.iteration)
 
         @trainer.on(Events.ITERATION_COMPLETED(every=self.cfg.log_every))
         def log_gradients(engine):
@@ -284,12 +296,17 @@ class LoggingCallback:
                         dict_res[f"{k}"] = v
 
                 pprint.pprint({"epoch": trainer.state.epoch, **dict_res})
-                # --- UPDATED logging ---
+                ##
                 with open(self.log_file_path, "a") as f:
                     f.write(f"\n[VALID EPOCH {trainer.state.epoch}]\n")
                     pprint.pprint({"epoch": trainer.state.epoch, **dict_res}, stream=f)
                     f.write("\n")
-                # -----------------------
+                ##
+
+                if "tensorboard" in self.cfg.logger_name and idist.get_rank() == 0:
+                    for key, value in dict_res.items():
+                        self.tensor_writer.add_scalar(key, value, trainer.state.epoch)
+
 
     def on_completion(self, trainer):
         @trainer.on(Events.COMPLETED)
