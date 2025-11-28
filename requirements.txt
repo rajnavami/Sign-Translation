@@ -23,3 +23,7 @@ albucore==0.0.13
 tqdm
 xformers==0.0.26.post1
 loguru
+tensorflow==2.20.0
+tensorboard
+tb-nightly==2.20.0
+
