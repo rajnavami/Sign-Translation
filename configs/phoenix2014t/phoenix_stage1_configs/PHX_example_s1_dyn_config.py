@@ -15,6 +15,7 @@ def get_config():
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
+    cfg.log_name = "dino_v3_img_size_change = 512"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -169,7 +170,7 @@ def get_config():
     cfg.seed = 1
     cfg.grad_clip_norm = 1.0
     cfg.grad_clip_value = 1.0
-    cfg.logger_name = ["text"]
+    cfg.logger_name = ["text", "tensorboard"]
     cfg.resume = True
     cfg.train_length = None
     cfg.val_length = None
