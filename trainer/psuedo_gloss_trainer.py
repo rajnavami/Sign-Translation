@@ -182,11 +182,20 @@ class Trainer(BaseTrainer):
             engine.state.batch = None
             evaluator.run(valid_dl, max_epochs=1, epoch_length=cfg.val_length)
 
+        def run_test_tester(engine):
+            engine.state.output = None
+            engine.state.batch = None
+            test_tester.run(test_dl, max_epochs=1, epoch_length=cfg.val_length)
+
+
         self.logger.on_train_epoch_end(trainer, self.optimizer)
         self.logger.on_train_iteration(trainer, self.model, self.scaler)
 
         trainer.add_event_handler(Events.EPOCH_COMPLETED(every=1), run_evaluator)
         self.logger.on_valid_epoch_end(trainer, evaluator)
+
+        trainer.add_event_handler(Events.EPOCH_COMPLETED(every=10), run_test_tester)
+        self.logger.on_test_epoch_end(trainer, test_tester)
 
         self.logger.on_completion(trainer)
 

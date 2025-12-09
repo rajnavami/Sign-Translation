@@ -306,6 +306,59 @@ class LoggingCallback:
                 if "tensorboard" in self.cfg.logger_name and idist.get_rank() == 0:
                     for key, value in dict_res.items():
                         self.tensor_writer.add_scalar(key, value, trainer.state.epoch)
+    def on_test_epoch_end(self, trainer, test_tester):
+        @test_tester.on(Events.EPOCH_COMPLETED(every=1))
+        def print_test_output(engine):
+            if "wandb" in self.cfg.logger_name and idist.get_rank() == 0:
+                for k, v in engine.state.metrics.items():
+                    if "summary" in k:
+                        continue
+                    if type(v) == dict:
+                        for k_i, v_i in v.items():
+                            self.writer.log(
+                                {f"{k}_{k_i}": v_i, f"epoch": trainer.state.epoch}
+                            )
+                    else:
+                        self.writer.log({f"{k}": v, f"epoch": trainer.state.epoch})
+            if "discord" in self.cfg.logger_name and idist.get_rank() == 0:
+                results_test = []
+                for k, v in collections.OrderedDict(
+                    sorted(engine.state.metrics.items())
+                ).items():
+                    if "summary" in k:
+                        continue
+                    if type(v) != dict:
+                        results_test.append({"name": k, "value": v, "inline": True})
+                
+                self.discord_hook.send_message(
+                    content=None,
+                    description=f"Test Results for Epoch: {trainer.state.epoch}",
+                    results=results_test,
+                    img=None,
+                    color=65280,  #green
+                )
+            if "text" in self.cfg.logger_name and idist.get_rank() == 0:
+                dict_res = {}
+                for k, v in engine.state.metrics.items():
+                    if "summary" in k:
+                        continue
+                    if type(v) == dict:
+                        for k_i, v_i in v.items():
+                            dict_res[f"{k}_{k_i}"] = v_i
+                    else:
+                        dict_res[f"{k}"] = v
+
+                pprint.pprint({"epoch": trainer.state.epoch, **dict_res})
+                ##
+                with open(self.log_file_path, "a") as f:
+                    f.write(f"\n[TEST EPOCH {trainer.state.epoch}]\n")
+                    pprint.pprint({"epoch": trainer.state.epoch, **dict_res}, stream=f)
+                    f.write("\n")
+                ##
+
+                if "tensorboard" in self.cfg.logger_name and idist.get_rank() == 0:
+                    for key, value in dict_res.items():
+                        self.tensor_writer.add_scalar(key, value, trainer.state.epoch)
 
 
     def on_completion(self, trainer):
