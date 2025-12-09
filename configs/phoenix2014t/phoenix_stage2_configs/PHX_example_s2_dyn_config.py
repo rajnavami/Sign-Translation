@@ -177,7 +177,7 @@ def get_config():
             "lora_layers": list(np.arange(0, 24, 1)),
             "w_lora_ff": False,
             "lora_rank": 4,
-            "lora_drop": 0.1,
+            "lora_drop": 0.4, #0.1
             "gate_type": "clamp",
             "lora_a": 4.0,
             "adapt_tokens": False,

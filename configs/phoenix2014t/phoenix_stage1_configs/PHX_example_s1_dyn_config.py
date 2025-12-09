@@ -150,7 +150,7 @@ def get_config():
         "in_dim": dim_model,
         "hidden_dim": 300,
         "num_classes": 2330,    #old value: 2306, udpated as .pkl file has 2330 classes # NOTE: if using the config in github release pkl then num classes is 2533, spacy seems to have changed something
-        "dropout": 0.2,
+        "dropout": 0.4,  #0.2
         "class_temperature": 0.1,
         "time_temperature": 0.1,
         "dynamic_time_temperatures": True,
