@@ -15,7 +15,7 @@ def get_config():
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
-    cfg.log_name = "signcl_maxlen64_margin_org"
+    cfg.log_name = "signcl_w=4"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -89,7 +89,7 @@ def get_config():
                     "neg_samples": 4,
                     # "margin": 20,
             },
-                    "weight": 0.01, #0.001
+                    "weight": 4.0, #0.001
         },
             }
         }

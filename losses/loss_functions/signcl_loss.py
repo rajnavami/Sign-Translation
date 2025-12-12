@@ -84,6 +84,6 @@ class Loss(nn.Module):
         
         # num_negative = 30  # or 4 × neg_samples
         # margin = min(margin, int((num_frames - num_negative) / 2))
-        margin = max(10, int((num_frames // text_length + 1) * 2.3))
+        margin = max(20, int((num_frames // text_length + 1) * 2.3))
         
         return self.signcl(frames_feature, margin=margin)
