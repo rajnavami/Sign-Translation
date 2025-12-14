@@ -187,8 +187,8 @@ def get_config():
 
     cfg.gen_params = {"max_length": 64, "temperature": 1.0, "num_beams": 4}
 
-    # cfg.run = False  #True, to test the model
-    # cfg.load_from_ckpt = "best"
+    cfg.run = True  #True, to test the model
+    cfg.load_from_ckpt = "best"
 
     cfg.seed = 1
     cfg.grad_clip_norm = 1.0

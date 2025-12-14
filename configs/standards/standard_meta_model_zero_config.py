@@ -11,14 +11,22 @@ def get_sign_encoder():
         "spatial_params": {
             # "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
             "ckpt_dir": "/data/sign2gpt/Sign2GPT/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
-            "trainable_names": [],
+            "trainable_names": ["blocks.9","blocks.10","blocks.11"], #last 3 layers of dinov3
             "adaptor_layers": list(np.arange(9, 12, 1)),
-            "adapt_params": {
-                "w_lora": True,
-                "w_lora_ff": True,
-                "lora_rank": 4,
-                "lora_drop": 0.1,
-                "lora_a": 4.0,
+           # "adapt_params": {
+            #    "w_lora": True,
+             #   "w_lora_ff": True,
+              #  "lora_rank": 4,
+               # "lora_drop": 0.1,
+                #"lora_a": 4.0,
+               # "rng_init": False,
+            #},
+             "adapt_params": {
+               "w_lora": False,
+               "w_lora_ff": False,
+                "lora_rank": 0,
+                "lora_drop": 0.0,
+                "lora_a": 0.0,
                 "rng_init": False,
             },
         },
@@ -84,13 +92,17 @@ def get_proto_head_params(dim_model):
 
 def get_decoder_adaptor_params():
     adaptor_params= {
-        "adapt_layers": list(np.arange(0, 24, 1)),
-        "lora_layers": list(np.arange(0, 24, 1)),
+        #"adapt_layers": list(np.arange(0, 24, 1)),
+        "adapt_layers":[],
+        #"lora_layers": list(np.arange(0, 24, 1)),
+        "lora_layers": [],
         "w_lora_ff": False,
-        "lora_rank": 4,
-        "lora_drop": 0.1,
+        #"lora_rank": 4,
+        "lora_rank": 0,
+        #"lora_drop": 0.1,
+        "lora_drop": 0.0,
         "gate_type": "clamp",
-        "lora_a": 4.0,
+        "lora_a": 0.0,
         "adapt_tokens": False,
     }
     # TODO: UPDATE THIS TO REFECT WITHIN MODEL
