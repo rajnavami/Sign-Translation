@@ -15,7 +15,7 @@ def get_config():
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
-    cfg.log_name = "signcl_maxlen64_margin_org"
+    cfg.log_name = "dinov2_wo_Lora"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -45,7 +45,8 @@ def get_config():
 
     cfg.gate_grad_multiplier = 1.0
 
-    cfg.lr = 3e-4  # * (cfg.bs**0.5) / (base_bs**0.5)
+    # cfg.lr = 3e-4  # * (cfg.bs**0.5) / (base_bs**0.5)
+    cfg.lr = 5e-5
     cfg.lr_scheduler = "warmupwithcosine"
     cfg.lr_scheduler_params = config_dict.ConfigDict(
         {

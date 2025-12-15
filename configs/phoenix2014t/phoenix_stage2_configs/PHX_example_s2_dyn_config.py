@@ -17,7 +17,7 @@ def get_config():
     base_name = Path(os.path.realpath(__file__)).parent.name
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
 
-    cfg.log_name = "signcl_maxlen64_margin_org"
+    cfg.log_name = "dinov2_wo_Lora"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -162,6 +162,7 @@ def get_config():
         stage1_ckpt_dir, best_checkpoint_name="_result_checkpoint_"
     )[0]
     # stage1_ckpt = '/data/sign2gpt/Sign2GPT/checkpoint_signcl/phoenix_stage1_configs/PHX_example_s1_dyn_config/best_result_checkpoint_29_0.0057.pt'
+    # stage1_ckpt = '/data/sign2gpt/Sign2GPT/checkpoint/phoenix_stage1_configs/PHX_example_s1_dyn_config/best_result_checkpoint_56_0.1713.pt'
     assert stage1_ckpt is not None and stage1_ckpt != ""
     cfg.model_name = "models.trial_models.test_stage2_model"
     cfg.model_params = {
@@ -187,8 +188,8 @@ def get_config():
 
     cfg.gen_params = {"max_length": 64, "temperature": 1.0, "num_beams": 4}
 
-    # cfg.run = False  #True, to test the model
-    # cfg.load_from_ckpt = "best"
+    cfg.run = True  #True, to test the model
+    cfg.load_from_ckpt = "best"
 
     cfg.seed = 1
     cfg.grad_clip_norm = 1.0
