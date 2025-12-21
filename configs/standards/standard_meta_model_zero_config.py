@@ -11,24 +11,25 @@ def get_sign_encoder():
         "spatial_params": {
             # "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
             "ckpt_dir": "/data/sign2gpt/Sign2GPT/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
-            "trainable_names": ["blocks.9","blocks.10","blocks.11"], #last 3 layers of dinov3
-            "adaptor_layers": list(np.arange(9, 12, 1)),
-           # "adapt_params": {
-            #    "w_lora": True,
-             #   "w_lora_ff": True,
-              #  "lora_rank": 4,
-               # "lora_drop": 0.1,
-                #"lora_a": 4.0,
-               # "rng_init": False,
-            #},
-             "adapt_params": {
-               "w_lora": False,
-               "w_lora_ff": False,
-                "lora_rank": 0,
-                "lora_drop": 0.0,
-                "lora_a": 0.0,
+            "trainable_names": ["blocks.9", "blocks.10", "blocks.11"],
+            # "adaptor_layers": list(np.arange(9, 12, 1)),
+            "adaptor_layers": [],
+            "adapt_params": {
+                "w_lora": False,
+                "w_lora_ff": False,
+                "lora_rank": 4,
+                "lora_drop": 0.1,
+                "lora_a": 4.0,
                 "rng_init": False,
             },
+            # "adapt_params": {
+            #     "w_lora": True,
+            #     "w_lora_ff": True,
+            #     "lora_rank": 4,
+            #     "lora_drop": 0.1,
+            #     "lora_a": 4.0,
+            #     "rng_init": False,
+            # },
         },
         "encoder_name": "models.metaformer.meta_model",
         "encoder_params": {
@@ -90,21 +91,19 @@ def get_proto_head_params(dim_model):
     }
     return post_name, post_params
 
+
 def get_decoder_adaptor_params():
     adaptor_params= {
-        #"adapt_layers": list(np.arange(0, 24, 1)),
-        "adapt_layers":[],
-        #"lora_layers": list(np.arange(0, 24, 1)),
-        "lora_layers": [],
+        "adapt_layers": list(np.arange(0, 24, 1)),
+        "lora_layers": list(np.arange(0, 24, 1)),
         "w_lora_ff": False,
-        #"lora_rank": 4,
-        "lora_rank": 0,
-        #"lora_drop": 0.1,
-        "lora_drop": 0.0,
+        "lora_rank": 4,
+        "lora_drop": 0.1,
         "gate_type": "clamp",
-        "lora_a": 0.0,
+        "lora_a": 4.0,
         "adapt_tokens": False,
     }
+    return adaptor_params
     # TODO: UPDATE THIS TO REFECT WITHIN MODEL
     # EXAMPLE BELOW TO INITIALISE LLM
     # lm_name = "facebook/xglm-564M"
