@@ -156,6 +156,7 @@ run_submit.sh
 # *.json
 test.py
 
+checkpoint*
 checkpoints/
 checkpoint/
 checkpoint_dinov2/
