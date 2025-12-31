@@ -11,7 +11,8 @@ def get_sign_encoder():
         "spatial_params": {
             "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
             "trainable_names": [],
-            "adaptor_layers": list(np.arange(9, 12, 1)),
+            # "adaptor_layers": list(np.arange(9, 12, 1)),
+            "adaptor_layers": list(np.arange(0, 12, 1)),
             "adapt_params": {
                 "w_lora": True,
                 "w_lora_ff": True,
