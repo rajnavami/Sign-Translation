@@ -31,6 +31,8 @@ class Mlp(nn.Module, ListForwardMixin):
         drop: float = 0.0,
         bias: bool = True,
         device=None,
+        adapt: bool = False,
+        adapt_params={},
     ) -> None:
         super().__init__()
         out_features = out_features or in_features
@@ -40,13 +42,65 @@ class Mlp(nn.Module, ListForwardMixin):
         self.fc2 = nn.Linear(hidden_features, out_features, bias=bias, device=device)
         self.drop = nn.Dropout(drop)
 
+        self.adapt = adapt
+        if self.adapt:
+            if not adapt_params["w_lora_ff"]:
+                self.adapt = False
+            else:
+                lora_rank = adapt_params["lora_rank"]
+                lora_a = adapt_params["lora_a"]
+                lora_drop = adapt_params["lora_drop"]
+                self.lora_w1_l1 = nn.Linear(in_features, lora_rank, bias=False, device=device)
+                self.lora_w1_l2 = nn.Linear(lora_rank, hidden_features, bias=False, device=device)
+                self.lora_w2_l1 = nn.Linear(hidden_features, lora_rank, bias=False, device=device)
+                self.lora_w2_l2 = nn.Linear(lora_rank, out_features, bias=False, device=device)
+                self.lora_scaling = lora_a / lora_rank
+                nn.init.normal_(self.lora_w1_l1.weight.data, 0, std=0.02)
+                nn.init.normal_(self.lora_w2_l1.weight.data, 0, std=0.02)
+                nn.init.constant_(self.lora_w1_l2.weight.data, 0)
+                nn.init.constant_(self.lora_w2_l2.weight.data, 0)
+                self.lora_drop = nn.Dropout(lora_drop)
+
+                if "fixed_adapt_style" in adapt_params:
+                    self.fixed_adapt_style = adapt_params["fixed_adapt_style"]
+                else:
+                    self.fixed_adapt_style = False
+
     def forward(self, x: Tensor) -> Tensor:
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
+        if self.adapt:
+            if not self.fixed_adapt_style:
+                x = self.fc1(x) + (
+                    self.lora_w1_l2(self.lora_w1_l1(self.lora_drop(x))) * self.lora_scaling
+                )
+                x = self.act(x)
+                x = self.drop(x)
+                x = self.fc2(x) + (
+                    self.lora_w2_l2(self.lora_w2_l1(self.lora_drop(x))) * self.lora_scaling
+                )
+                x = self.drop(x)
+                return x
+            else:
+                lora_x = (
+                    self.lora_w1_l2(self.lora_w1_l1(self.lora_drop(x))) * self.lora_scaling
+                )
+                lora_x = (
+                    self.lora_w2_l2(self.lora_w2_l1(self.lora_drop(lora_x))) * self.lora_scaling
+                )
+                
+                x = self.fc1(x)
+                x = self.act(x)
+                x = self.drop(x)
+                x = self.fc2(x)
+                x = x + lora_x
+                x = self.drop(x)
+                return x
+        else:
+            x = self.fc1(x)
+            x = self.act(x)
+            x = self.drop(x)
+            x = self.fc2(x)
+            x = self.drop(x)
+            return x
 
 
 class SwiGLUFFN(nn.Module, ListForwardMixin):

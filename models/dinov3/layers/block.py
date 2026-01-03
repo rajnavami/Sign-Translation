@@ -37,6 +37,8 @@ class SelfAttentionBlock(nn.Module):
         ffn_layer: Callable[..., nn.Module] = Mlp,
         mask_k_bias: bool = False,
         device=None,
+        adapt: bool = False,
+        adapt_params={},
     ) -> None:
         super().__init__()
         # print(f"biases: qkv: {qkv_bias}, proj: {proj_bias}, ffn: {ffn_bias}")
@@ -50,6 +52,8 @@ class SelfAttentionBlock(nn.Module):
             proj_drop=drop,
             mask_k_bias=mask_k_bias,
             device=device,
+            adapt=adapt,
+            adapt_params=adapt_params,
         )
         self.ls1 = LayerScale(dim, init_values=init_values, device=device) if init_values else nn.Identity()
 
@@ -62,6 +66,8 @@ class SelfAttentionBlock(nn.Module):
             drop=drop,
             bias=ffn_bias,
             device=device,
+            adapt=adapt,
+            adapt_params=adapt_params,
         )
         self.ls2 = LayerScale(dim, init_values=init_values, device=device) if init_values else nn.Identity()
 

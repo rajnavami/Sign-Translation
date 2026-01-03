@@ -51,6 +51,8 @@ class SelfAttention(nn.Module):
         proj_drop: float = 0.0,
         mask_k_bias: bool = False,
         device=None,
+        adapt: bool = False,
+        adapt_params={},
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
@@ -62,6 +64,48 @@ class SelfAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim, bias=proj_bias, device=device)
         self.proj_drop = nn.Dropout(proj_drop)
+
+        self.adapt = adapt
+        if self.adapt:
+            if not adapt_params["w_lora"]:
+                self.adapt = False
+            else:
+                lora_rank = adapt_params["lora_rank"]
+                lora_a = adapt_params["lora_a"]
+                lora_drop = adapt_params["lora_drop"]
+
+                if "new" not in adapt_params:
+                    self.lora_w1_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_w1_l2 = nn.Linear(lora_rank, dim * 3, bias=False, device=device)
+                    self.lora_w2_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_w2_l2 = nn.Linear(lora_rank, dim, bias=False, device=device)
+                    self.lora_scaling = lora_a / lora_rank
+                    nn.init.normal_(self.lora_w1_l1.weight.data, 0, std=0.02)
+                    nn.init.normal_(self.lora_w2_l1.weight.data, 0, std=0.02)
+                    nn.init.constant_(self.lora_w1_l2.weight.data, 0)
+                    nn.init.constant_(self.lora_w2_l2.weight.data, 0)
+                    self.new_lora = False
+                else:
+                    self.lora_wq_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_wq_l2 = nn.Linear(lora_rank, dim, bias=False, device=device)
+                    self.lora_wk_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_wk_l2 = nn.Linear(lora_rank, dim, bias=False, device=device)
+                    self.lora_wv_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_wv_l2 = nn.Linear(lora_rank, dim, bias=False, device=device)
+                    self.lora_wo_l1 = nn.Linear(dim, lora_rank, bias=False, device=device)
+                    self.lora_wo_l2 = nn.Linear(lora_rank, dim, bias=False, device=device)
+
+                    self.lora_scaling = lora_a / lora_rank
+                    nn.init.normal_(self.lora_wq_l1.weight.data, 0, std=0.02)
+                    nn.init.normal_(self.lora_wk_l1.weight.data, 0, std=0.02)
+                    nn.init.normal_(self.lora_wv_l1.weight.data, 0, std=0.02)
+                    nn.init.normal_(self.lora_wo_l1.weight.data, 0, std=0.02)
+                    nn.init.constant_(self.lora_wq_l2.weight.data, 0)
+                    nn.init.constant_(self.lora_wk_l2.weight.data, 0)
+                    nn.init.constant_(self.lora_wv_l2.weight.data, 0)
+                    nn.init.constant_(self.lora_wo_l2.weight.data, 0)
+                    self.new_lora = True
+                self.lora_drop = nn.Dropout(lora_drop)
 
     def apply_rope(self, q: Tensor, k: Tensor, rope: Tensor | Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
         # All operations will use the dtype of rope, the output is cast back to the dtype of q and k
@@ -85,22 +129,114 @@ class SelfAttention(nn.Module):
         return q, k
 
     def forward(self, x: Tensor, attn_bias=None, rope: Tensor = None) -> Tensor:
-        qkv = self.qkv(x)
-        attn_v = self.compute_attention(qkv=qkv, attn_bias=attn_bias, rope=rope)
-        x = self.proj(attn_v)
+        B, N, C = x.shape
+        
+        # DEBUG: Log once per training to verify LoRA is active
+        # if not hasattr(self, '_logged_adapt_status'):
+        #     from loguru import logger
+        #     logger.info(f"🔍 SelfAttention.forward: adapt={self.adapt}, new_lora={getattr(self, 'new_lora', 'N/A')}")
+        #     if self.adapt:
+        #         logger.info(f"   LoRA scaling: {self.lora_scaling}")
+        #     self._logged_adapt_status = True
+        
+        # Match DINOv2's exact structure - apply LoRA and reshape in one flow
+        if self.adapt:
+            if not self.new_lora:
+                # Old-style LoRA: apply to combined QKV, reshape immediately like DINOv2
+                qkv = (
+                    self.qkv(x) + (
+                        self.lora_w1_l2(self.lora_w1_l1(self.lora_drop(x))) * self.lora_scaling
+                    )
+                ).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+                q, k, v = torch.unbind(qkv, 2)  # [B, N, num_heads, C//num_heads]
+                q, k, v = [t.transpose(1, 2) for t in [q, k, v]]  # [B, num_heads, N, C//num_heads]
+            else:
+                # New-style LoRA: separate Q, K, V like DINOv2
+                qkv_base = self.qkv(x)
+                qlora = self.lora_wq_l2(self.lora_wq_l1(self.lora_drop(x))) * self.lora_scaling
+                klora = self.lora_wk_l2(self.lora_wk_l1(self.lora_drop(x))) * self.lora_scaling
+                vlora = self.lora_wv_l2(self.lora_wv_l1(self.lora_drop(x))) * self.lora_scaling
+                qkv = (qkv_base + torch.cat([qlora, klora, vlora], dim=-1)).reshape(
+                    B, N, 3, self.num_heads, C // self.num_heads
+                )
+                q, k, v = torch.unbind(qkv, 2)
+                q, k, v = [t.transpose(1, 2) for t in [q, k, v]]
+        else:
+            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            q, k, v = torch.unbind(qkv, 2)
+            q, k, v = [t.transpose(1, 2) for t in [q, k, v]]
+        
+        # Apply RoPE if provided (DINOv3-specific)
+        if rope is not None:
+            q, k = self.apply_rope(q, k, rope)
+        
+        # Use PyTorch's optimized attention (equivalent to DINOv2's manual implementation)
+        attn_out = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.0)
+        attn_out = attn_out.transpose(1, 2).reshape(B, N, C)
+        
+        # Apply projection with LoRA
+        if self.adapt:
+            if not self.new_lora:
+                x = self.proj(attn_out) + (
+                    self.lora_w2_l2(self.lora_w2_l1(self.lora_drop(attn_out))) * self.lora_scaling
+                )
+            else:
+                x = self.proj(attn_out) + (
+                    self.lora_wo_l2(self.lora_wo_l1(self.lora_drop(attn_out))) * self.lora_scaling
+                )
+        else:
+            x = self.proj(attn_out)
+        
         x = self.proj_drop(x)
         return x
 
+    # def forward_list(self, x_list, attn_bias=None, rope_list=None) -> List[Tensor]:
+    #     assert len(x_list) == len(rope_list)  # should be enforced by the Block
+    #     x_flat, shapes, num_tokens = cat_keep_shapes(x_list)
+    #     qkv_flat = self.qkv(x_flat)
+    #     qkv_list = uncat_with_shapes(qkv_flat, shapes, num_tokens)
+    #     att_out = []
+    #     for _, (qkv, _, rope) in enumerate(zip(qkv_list, shapes, rope_list)):
+    #         att_out.append(self.compute_attention(qkv, attn_bias=attn_bias, rope=rope))
+    #     x_flat, shapes, num_tokens = cat_keep_shapes(att_out)
+    #     x_flat = self.proj(x_flat)
+    #     return uncat_with_shapes(x_flat, shapes, num_tokens)
+        
     def forward_list(self, x_list, attn_bias=None, rope_list=None) -> List[Tensor]:
         assert len(x_list) == len(rope_list)  # should be enforced by the Block
         x_flat, shapes, num_tokens = cat_keep_shapes(x_list)
-        qkv_flat = self.qkv(x_flat)
+        
+        # Apply QKV with LoRA (matching forward() logic)
+        if self.adapt and not self.new_lora:
+            # Old-style LoRA on QKV
+            qkv_flat = self.qkv(x_flat) + (
+                self.lora_w1_l2(self.lora_w1_l1(self.lora_drop(x_flat))) * self.lora_scaling
+            )
+        elif self.adapt and self.new_lora:
+            # New-style LoRA: full QKV, LoRA applied in compute_attention
+            qkv_flat = self.qkv(x_flat)
+        else:
+            qkv_flat = self.qkv(x_flat)
+        
         qkv_list = uncat_with_shapes(qkv_flat, shapes, num_tokens)
         att_out = []
         for _, (qkv, _, rope) in enumerate(zip(qkv_list, shapes, rope_list)):
             att_out.append(self.compute_attention(qkv, attn_bias=attn_bias, rope=rope))
         x_flat, shapes, num_tokens = cat_keep_shapes(att_out)
-        x_flat = self.proj(x_flat)
+        
+        # Apply projection with LoRA (matching forward() logic)
+        if self.adapt:
+            if not self.new_lora:
+                x_flat = self.proj(x_flat) + (
+                    self.lora_w2_l2(self.lora_w2_l1(self.lora_drop(x_flat))) * self.lora_scaling
+                )
+            else:
+                x_flat = self.proj(x_flat) + (
+                    self.lora_wo_l2(self.lora_wo_l1(self.lora_drop(x_flat))) * self.lora_scaling
+                )
+        else:
+            x_flat = self.proj(x_flat)
+        
         return uncat_with_shapes(x_flat, shapes, num_tokens)
 
     def compute_attention(self, qkv: Tensor, attn_bias=None, rope=None) -> Tensor:
@@ -108,9 +244,28 @@ class SelfAttention(nn.Module):
         B, N, _ = qkv.shape
         C = self.qkv.in_features
 
-        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
-        q, k, v = torch.unbind(qkv, 2)
-        q, k, v = [t.transpose(1, 2) for t in [q, k, v]]
+        if self.adapt and self.new_lora:
+            # New style LoRA: apply to Q, K, V separately
+            qkv_orig = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            q, k, v = torch.unbind(qkv_orig, 2)
+            
+            # Apply LoRA to Q, K, V
+            q_flat = q.reshape(B, N, C)
+            k_flat = k.reshape(B, N, C)
+            v_flat = v.reshape(B, N, C)
+            
+            q_lora = self.lora_wq_l2(self.lora_wq_l1(self.lora_drop(q_flat))) * self.lora_scaling
+            k_lora = self.lora_wk_l2(self.lora_wk_l1(self.lora_drop(k_flat))) * self.lora_scaling
+            v_lora = self.lora_wv_l2(self.lora_wv_l1(self.lora_drop(v_flat))) * self.lora_scaling
+            
+            q = (q_flat + q_lora).reshape(B, N, self.num_heads, C // self.num_heads).transpose(1, 2)
+            k = (k_flat + k_lora).reshape(B, N, self.num_heads, C // self.num_heads).transpose(1, 2)
+            v = (v_flat + v_lora).reshape(B, N, self.num_heads, C // self.num_heads).transpose(1, 2)
+        else:
+            qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            q, k, v = torch.unbind(qkv, 2)
+            q, k, v = [t.transpose(1, 2) for t in [q, k, v]]
+        
         if rope is not None:
             q, k = self.apply_rope(q, k, rope)
         x = torch.nn.functional.scaled_dot_product_attention(q, k, v)

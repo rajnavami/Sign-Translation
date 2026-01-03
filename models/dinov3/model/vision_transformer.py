@@ -87,6 +87,8 @@ class DinoVisionTransformer(nn.Module):
         untie_cls_and_patch_norms: bool = False,
         untie_global_and_local_cls_norm: bool = False,
         device: Any | None = None,
+        adaptor_layers=[],
+        adapt_params={},
         **ignored_kwargs,
     ):
         super().__init__()
@@ -109,10 +111,10 @@ class DinoVisionTransformer(nn.Module):
             flatten_embedding=False,
         )
 
-        self.cls_token = nn.Parameter(torch.empty(1, 1, embed_dim, device=device))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim, device=device))
         self.n_storage_tokens = n_storage_tokens
         if self.n_storage_tokens > 0:
-            self.storage_tokens = nn.Parameter(torch.empty(1, n_storage_tokens, embed_dim, device=device))
+            self.storage_tokens = nn.Parameter(torch.zeros(1, n_storage_tokens, embed_dim, device=device))
         logger.info(f"using base={pos_embed_rope_base} for rope new")
         logger.info(f"using min_period={pos_embed_rope_min_period} for rope new")
         logger.info(f"using max_period={pos_embed_rope_max_period} for rope new")
@@ -152,6 +154,8 @@ class DinoVisionTransformer(nn.Module):
                 init_values=layerscale_init,
                 mask_k_bias=mask_k_bias,
                 device=device,
+                adapt=True if i in adaptor_layers else False,
+                adapt_params=adapt_params,
             )
             for i in range(depth)
         ]
@@ -177,7 +181,10 @@ class DinoVisionTransformer(nn.Module):
         else:
             self.local_cls_norm = None
         self.head = nn.Identity()
-        self.mask_token = nn.Parameter(torch.empty(1, embed_dim, device=device))
+        self.mask_token = nn.Parameter(torch.zeros(1, embed_dim, device=device))
+
+        if "rng_init" in adapt_params and adapt_params["rng_init"]:
+            self.init_weights()
 
     def init_weights(self):
         self.rope_embed._init_weights()
