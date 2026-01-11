@@ -18,7 +18,7 @@ class Model(nn.Module):
         super().__init__()
         self.spatial_model = vit_small(
             img_size=518,
-            init_values=1.0,
+            layerscale_init=1.0,
             patch_size=16,  # 14
             block_chunks=0,
             adaptor_layers=adaptor_layers,
@@ -33,10 +33,10 @@ class Model(nn.Module):
 
         logger.info(f"ckpt_dir: {ckpt_dir}")
 
-        if idist.get_local_rank() == 0 or idist.get_world_size() == 0:
-            if not os.path.isfile("/tmp/tmp.pth"):
-                r = requests.get(ckpt_dir)
-                open("/tmp/tmp.pth", "wb").write(r.content)
+        # if idist.get_local_rank() == 0 or idist.get_world_size() == 0:
+        #     if not os.path.isfile("/tmp/tmp.pth"):
+        #         r = requests.get(ckpt_dir)
+        #         open("/tmp/tmp.pth", "wb").write(r.content)
 
         if idist.get_world_size() > 0:
             idist.barrier()

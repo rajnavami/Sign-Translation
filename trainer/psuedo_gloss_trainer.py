@@ -1,6 +1,9 @@
 import datetime
 import torch
 
+import os
+import yaml
+
 import ignite.distributed as idist
 from ignite.engine import Engine, Events
 from ignite.utils import convert_tensor
@@ -30,6 +33,13 @@ class Trainer(BaseTrainer):
             writer = SummaryWriter(f"runs/{stage_name}")
             self.logger = LoggingCallback(self.cfg, stage_name, writer)
             self.logger.start_logger()
+
+            #save config
+            config_save_dir = f"runs/{stage_name}"
+            config_save_path = os.path.join(config_save_dir, "stage1_config.yaml")
+            cfg_dict = cfg.to_dict() if hasattr(cfg, 'to_dict') else dict(cfg)
+            with open(config_save_path, 'w') as f:
+                yaml.dump(cfg_dict, f, default_flow_style=False)
 
         self.max_length = 128
 
