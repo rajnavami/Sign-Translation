@@ -31,7 +31,7 @@ class Model(nn.Module):
         adapt_params: Optional[Dict[str, Any]] = None,
         out_dim: Optional[int] = None,
         freeze: bool = False,
-        img_size: int = 518,
+        img_size: int = 512,
         patch_size: int = 16,
     ):
         super().__init__()
