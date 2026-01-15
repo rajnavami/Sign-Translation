@@ -1,4 +1,20 @@
+# sign2gpt/Sign2GPT/configs/standards/standard_meta_model_zero_config.py
+
 import numpy as np
+
+
+# -----------------------------
+# DINOv3 + LoRA configuration
+# -----------------------------
+# Notes:
+# - adaptor_layers controls WHICH transformer blocks get LoRA (0..11 for ViT-S depth=12).
+# - adapt_params must include:
+#     - w_lora      : enable LoRA in Attention (QKV + output proj)
+#     - w_lora_ff   : enable LoRA in FFN (MLP/SwiGLU)
+#     - lora_rank, lora_a, lora_drop
+# - If you want "new style" LoRA (separate Q/K/V), add: "new": True
+#   If you omit "new", it uses the "old style" LoRA (single low-rank update on combined QKV),
+#   which matches the common DINOv2 setup you had before.
 
 
 def get_sign_encoder():
@@ -6,42 +22,49 @@ def get_sign_encoder():
     dim_model = 512
     dropout = 0.1
     num_heads = 8
+
+    # Choose which ViT blocks get LoRA (ViT-S has depth=12 => blocks 0..11)
+    # adaptor_layers = list(range(12))  # all blocks
+    # # adaptor_layers = [9, 10, 11]    # example: only last 3 blocks
+
+    # adapt_params = {
+    #     "w_lora": True,        # Attention LoRA ON
+    #     "w_lora_ff": True,     # FFN LoRA ON
+    #     "lora_rank": 16,
+    #     "lora_drop": 0.05,
+    #     "lora_a": 16.0,
+    #     "rng_init": False,     # keep False for pretrained loading
+    #     # "new": True,         # OPTIONAL: enable separate Q/K/V LoRA style
+    # }
+
+    # /////////////////
+    
+    adaptor_layers = [9, 10, 11]  # top 3 blocks for ViT-S depth=12
+    adapt_params = {
+        "w_lora": True,
+        "w_lora_ff": True,
+        "lora_rank": 4,
+        "lora_a": 4.0,
+        "lora_drop": 0.05,   # paper doesn’t pin this; 0.05–0.1 is typical
+        "rng_init": False,
+        # "new": True,  # optional; only if your DINOv3 LoRA code supports it
+    }
+
+
     sign_model_params = {
         "spatial_name": "models.spatial_models.frame_models.dino_adaptor_model",
         "spatial_params": {
-            # "ckpt_dir": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_pretrain.pth",
+            # DINOv3 ViT-S16 pretrained checkpoint (local path)
             "ckpt_dir": "/data/sign2gpt/Sign2GPT/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
-    
-            # "trainable_names": ["patch_embed", "blocks.6", "blocks.7", "blocks.8", "blocks.9", "blocks.10", "blocks.11"],
+
+            # Keep empty so only missing_keys (LoRA) become trainable via your loading logic
             "trainable_names": [],
-            "adaptor_layers": list(np.arange(0, 12, 1)),
-            "adapt_params": {
-                "w_lora": True,
-                "w_lora_ff": True,
-                "lora_rank": 16,
-                "lora_drop": 0.05,
-                "lora_a": 16.0,
-                "rng_init": False,
-            },
-            # "trainable_names": ["blocks.0","blocks.1","blocks.2","blocks.3","blocks.4","blocks.5","blocks.6","blocks.7","blocks.8","blocks.9", "blocks.10", "blocks.11"],
-            # "adaptor_layers": list(np.arange(0, 12, 1)),
-            # "adaptor_layers": [],
-            # "adapt_params": {
-            #     "w_lora": False,
-            #     "w_lora_ff": False,
-            #     "lora_rank": 4,
-            #     "lora_drop": 0.1,
-            #     "lora_a": 4.0,
-            #     "rng_init": False,
-            # },
-            # "adapt_params": {
-            #     "w_lora": True,
-            #     "w_lora_ff": True,
-            #     "lora_rank": 4,
-            #     "lora_drop": 0.1,
-            #     "lora_a": 4.0,
-            #     "rng_init": False,
-            # },
+
+            # LoRA applied to these blocks
+            "adaptor_layers": adaptor_layers,
+
+            # LoRA hyperparams
+            "adapt_params": adapt_params,
         },
         "encoder_name": "models.metaformer.meta_model",
         "encoder_params": {
@@ -86,6 +109,7 @@ def get_sign_encoder():
     }
     return model_name, sign_model_params, dim_model
 
+
 def get_proto_head_params(dim_model):
     post_name = "models.metaformer.post.zero_fasttext_prototype_head"
     post_params = {
@@ -98,16 +122,16 @@ def get_proto_head_params(dim_model):
         "dynamic_time_temperatures": False,
         "dynamic_class_temperatures": False,
         "emb_lang": "de",
-        "emb_pkl_dir": f"data/phoenix2014t/processed_words.phx_pkl",
+        "emb_pkl_dir": "data/phoenix2014t/processed_words.phx_pkl",
         "trainable_emb": True,
     }
     return post_name, post_params
 
 
 def get_decoder_adaptor_params():
-    adaptor_params= {
-        "adapt_layers": list(np.arange(0, 24, 1)),
-        "lora_layers": list(np.arange(0, 24, 1)),
+    adaptor_params = {
+        "adapt_layers": list(range(24)),
+        "lora_layers": list(range(24)),
         "w_lora_ff": False,
         "lora_rank": 4,
         "lora_drop": 0.1,
@@ -116,17 +140,3 @@ def get_decoder_adaptor_params():
         "adapt_tokens": False,
     }
     return adaptor_params
-    # TODO: UPDATE THIS TO REFECT WITHIN MODEL
-    # EXAMPLE BELOW TO INITIALISE LLM
-    # lm_name = "facebook/xglm-564M"
-    # additional_tokens = {
-    #     "eos_token": ".",
-    # }
-    # pretext = ""
-    # new_token_length = None
-    # lang_model = XGLMForCausalLM.from_pretrained(llm_name)
-    # if new_token_length is not None:
-    #         lang_model.resize_token_embeddings(new_token_length)
-    #     for name, param in lang_model.named_parameters():
-    #         param.requires_grad = False
-    #     lang_model.init_adaptor(**adaptor_params)
