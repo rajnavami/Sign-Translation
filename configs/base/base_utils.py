@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def get_checkpoint_path(base_name, name):
-    ckpt_path = "checkpoint"
+    ckpt_path = "ckpt_pose_transformer_concat_256"
     return ckpt_path
 
 

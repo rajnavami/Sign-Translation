@@ -20,6 +20,10 @@ def get_sign_encoder():
                 "lora_a": 4.0,
                 "rng_init": False,
             },
+            "use_hand_emb": True,
+            "num_hands": 2,
+            "hand_emb_dim": 208,
+            "fusion_dim": 256, 
         },
         "encoder_name": "models.metaformer.meta_model",
         "encoder_params": {

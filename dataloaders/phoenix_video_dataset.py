@@ -74,6 +74,7 @@ class PhoenixVideoDataset(Dataset):
             selection = np.sort(selection)
 
         frames = self.lmdb_util_video.get_frames(selection)
+        hand_landmarks = self.lmdb_util_video.get_hand_landmarks(selection)
 
         if self.transform:
             frames = self.transform.aug_video(frames, self.isValid)
@@ -108,6 +109,11 @@ class PhoenixVideoDataset(Dataset):
             **(
                 {"pseudo_gloss_ids": torch.tensor(pseudo_gloss_ids).long()}
                 if self.dict_lem_to_id
+                else {}
+            ),
+            **(
+                {"hand_landmarks": torch.from_numpy(hand_landmarks)}
+                if hand_landmarks is not None
                 else {}
             ),
         }

@@ -27,8 +27,9 @@ class Model(nn.Module):
         self,
         frame_features,
         max_len,
+        hand_landmarks=None,
     ):
-        x, mask, dict_feat = self.spatial_model(frame_features, max_len=max_len)
+        x, mask, dict_feat = self.spatial_model(frame_features, max_len=max_len, list_of_hand_landmarks=hand_landmarks)
         enc_output = self.encoder(x, mask)
         return {
             "enc_output": enc_output,

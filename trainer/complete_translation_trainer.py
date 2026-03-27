@@ -432,7 +432,8 @@ class Trainer(BaseTrainer):
         )
 
         frame_features = frames
-
+        hand_landmarks = batch.get("hand_landmarks", None)
+        
         frame_mask = torch.zeros(
             len(frame_features), max([len(feat) for feat in frame_features])
         )
@@ -471,6 +472,7 @@ class Trainer(BaseTrainer):
                 "max_len": torch.tensor(
                     self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
                 ),
+                "hand_landmarks": hand_landmarks,
             },
             "targets": {
                 "gloss_ids": batch["gloss_ids"] if "gloss_ids" in batch else [],

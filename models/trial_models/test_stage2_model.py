@@ -53,8 +53,9 @@ class Model(nn.Module):
         max_len,
         generate=False,
         gen_params={},
+        hand_landmarks=None,
     ):
-        dict_sign_output = self.sign_model(frame_features, max_len=max_len)
+        dict_sign_output = self.sign_model(frame_features, max_len=max_len, hand_landmarks=hand_landmarks)
 
         post_features, post_mask = (
             dict_sign_output["enc_output"]["post_output"]["x"],

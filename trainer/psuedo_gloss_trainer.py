@@ -252,6 +252,14 @@ class Trainer(BaseTrainer):
         self.model = idist.auto_model(
             self.model, find_unused_parameters=False, sync_bn=True
         )
+        print("\n=== TRAINABLE PARAMETERS ===")
+        total = 0
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                print(f"  {name}: {param.shape}")
+                total += param.numel()
+        print(f"\nTotal trainable: {total:,}")
+        print("=== END TRAINABLE PARAMETERS ===\n")
 
     def prep_batch(self, batch, isValid=False, cuda=True):
         idx, frames = (
@@ -260,6 +268,7 @@ class Trainer(BaseTrainer):
         )
 
         frame_features = frames
+        hand_landmarks = batch.get("hand_landmarks", None)
 
         res = {
             "model_input": {
@@ -267,6 +276,7 @@ class Trainer(BaseTrainer):
                 "max_len": torch.tensor(
                     self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
                 ),
+                "hand_landmarks": hand_landmarks,
             },
             "targets": {
                 "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
