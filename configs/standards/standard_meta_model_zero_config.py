@@ -65,6 +65,11 @@ def get_sign_encoder():
 
             # LoRA hyperparams
             "adapt_params": adapt_params,
+
+            # Optical flow settings
+            "use_flow": True,
+            "flow_ckpt_dir": None,  # Not needed for torchvision RAFT
+            "flow_params": {},
         },
         "encoder_name": "models.metaformer.meta_model",
         "encoder_params": {

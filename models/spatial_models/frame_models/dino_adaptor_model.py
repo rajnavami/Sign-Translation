@@ -9,6 +9,15 @@ import ignite.distributed as idist
 from loguru import logger
 
 from models.dinov3.model.vision_transformer import vit_small
+from models.RAFT.core.raft import RAFT
+
+# Add RAFT imports for optical flow
+try:
+    from torchvision.models.optical_flow import raft_small
+    RAFT_AVAILABLE = True
+except ImportError:
+    RAFT_AVAILABLE = False
+    print("Torchvision RAFT not available. Install torchvision>=0.13.0")
 
 
 class Model(nn.Module):
@@ -33,12 +42,16 @@ class Model(nn.Module):
         freeze: bool = False,
         img_size: int = 512,
         patch_size: int = 16,
+        use_flow: bool = False,
+        flow_ckpt_dir: Optional[str] = None,
+        flow_params: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
 
         trainable_names = trainable_names or []
         adaptor_layers = adaptor_layers or []
         adapt_params = adapt_params or {}
+        flow_params = flow_params or {}
 
         if out_dim is None:
             raise ValueError("out_dim must be provided (e.g., dim_model=512).")
@@ -58,7 +71,37 @@ class Model(nn.Module):
         self.lin = nn.Linear(num_features, out_dim)
         self.bn = nn.BatchNorm1d(out_dim)
 
+        # Optical flow setup
+        self.use_flow = use_flow
+        if self.use_flow:
+            if not RAFT_AVAILABLE:
+                raise ImportError("Torchvision RAFT not available. Install torchvision>=0.13.0")
+            self.flow_model = raft_small(pretrained=True)
+            self.flow_model.eval()
+            # Freeze flow model
+            for param in self.flow_model.parameters():
+                param.requires_grad = False
+            # Separate DINO for flow features
+            self.flow_dino = vit_small(
+                img_size=img_size,
+                patch_size=patch_size,
+                layerscale_init=1.0,
+                adaptor_layers=adaptor_layers,
+                adapt_params=adapt_params,
+                block_chunks=0,
+            )
+            # Load same checkpoint for flow DINO
+            ckpt_path = self._resolve_checkpoint(ckpt_dir)
+            self.flow_dino.load_state_dict(torch.load(ckpt_path, map_location="cpu"), strict=False)
+            # Freeze flow DINO
+            for param in self.flow_dino.parameters():
+                param.requires_grad = False
+            # Fusion layer: concat RGB + Flow features
+            self.fusion_lin = nn.Linear(num_features * 2, out_dim)
+            self.fusion_bn = nn.BatchNorm1d(out_dim)
+
         logger.info(f"ckpt_dir: {ckpt_dir}")
+        logger.info(f"use_flow: {self.use_flow}")
 
         ckpt_path = self._resolve_checkpoint(ckpt_dir)
 
@@ -109,28 +152,6 @@ class Model(nn.Module):
             if idist.get_world_size() > 0:
                 idist.barrier()
 
-            return local_path
-
-        # Local path
-        if not os.path.isfile(ckpt_dir):
-            raise FileNotFoundError(f"Checkpoint not found: {ckpt_dir}")
-        return ckpt_dir
-
-    @staticmethod
-    def pad(tensor: torch.Tensor, length: int) -> torch.Tensor:
-        """
-        tensor: [T, C]
-        returns: [length, C] (zero padded)
-        """
-        if tensor.size(0) == length:
-            return tensor
-        if tensor.size(0) > length:
-            return tensor[:length]
-        return torch.cat(
-            [tensor, tensor.new_zeros((length - tensor.size(0),) + tensor.size()[1:])],
-            dim=0,
-        )
-
     def forward(self, list_of_frames: List[torch.Tensor], max_len: Optional[int] = 1024):
         """
         list_of_frames: list length B, each element is a tensor [Ti, 3, H, W]
@@ -145,13 +166,46 @@ class Model(nn.Module):
         # Flatten frames to one big batch: [sum(Ti), 3, H, W]
         x = torch.cat(list_of_frames, dim=0)
 
-        # DINOv3 features
-        feats = self.spatial_model.forward_features(x)["x_norm_clstoken"]  # [sum(Ti), 384]
-        list_of_original_features = feats
+        if self.use_flow and lengths[0] > 1:  # Need at least 2 frames for flow
+            # Compute optical flow between consecutive frames
+            flow_images = []
+            for seq in list_of_frames:
+                if len(seq) < 2:
+                    # If only one frame, use zero flow
+                    flow_img = torch.zeros_like(seq[0:1, :2, :, :])  # [1, 2, H, W]
+                    flow_images.append(flow_img.repeat(len(seq), 1, 1, 1))
+                else:
+                    seq_flows = []
+                    for i in range(len(seq) - 1):
+                        img1 = seq[i]  # [3, H, W]
+                        img2 = seq[i+1]  # [3, H, W]
+                        with torch.no_grad():
+                            predictions = self.flow_model(img1, img2)
+                            flow = predictions[-1].unsqueeze(0)  # [1, 2, H, W]
+                        seq_flows.append(flow.squeeze(0))
+                    # For the last frame, use the previous flow
+                    seq_flows.append(seq_flows[-1] if seq_flows else torch.zeros_like(seq[0][:2]))
+                    flow_tensor = torch.stack(seq_flows, dim=0)  # [Ti, 2, H, W]
+                    flow_images.append(flow_tensor)
+            flow_x = torch.cat(flow_images, dim=0)  # [sum(Ti), 2, H, W]
+            # Convert flow to 3-channel by duplicating or using magnitude
+            flow_x = torch.cat([flow_x, flow_x.mean(dim=1, keepdim=True)], dim=1)  # [sum(Ti), 3, H, W]
 
-        # Safer for BN: cast to fp32 before linear+bn
-        feats = feats.float()
-        y = self.bn(self.lin(feats))  # [sum(Ti), out_dim]
+            # Get flow features
+            flow_feats = self.flow_dino.forward_features(flow_x)["x_norm_clstoken"]  # [sum(Ti), 384]
+            flow_y = self.bn(self.lin(flow_feats.float()))  # [sum(Ti), out_dim]
+
+            # Get RGB features
+            rgb_feats = self.spatial_model.forward_features(x)["x_norm_clstoken"]  # [sum(Ti), 384]
+            rgb_y = self.bn(self.lin(rgb_feats.float()))  # [sum(Ti), out_dim]
+
+            # Fuse: concat and project
+            fused_feats = torch.cat([rgb_y, flow_y], dim=-1)  # [sum(Ti), out_dim * 2]
+            y = self.fusion_bn(self.fusion_lin(fused_feats))  # [sum(Ti), out_dim]
+        else:
+            # Original RGB-only path
+            feats = self.spatial_model.forward_features(x)["x_norm_clstoken"]  # [sum(Ti), 384]
+            y = self.bn(self.lin(feats.float()))  # [sum(Ti), out_dim]
 
         if max_len is None:
             max_len = max(lengths)
@@ -173,4 +227,5 @@ class Model(nn.Module):
         for i, l in enumerate(lengths):
             mask[i, :l] = True
 
-        return y_out, mask, {"list_of_original_features": list_of_original_features}
+        return y_out, mask, {"list_of_original_features": y}
+
