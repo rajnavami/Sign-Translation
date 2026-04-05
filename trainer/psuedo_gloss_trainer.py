@@ -9,6 +9,7 @@ import ignite.distributed as idist
 from ignite.engine import Engine, Events
 from ignite.utils import convert_tensor
 from torch.utils.tensorboard import SummaryWriter
+from loguru import logger
 
 from models.get_models import get_model
 from trainer.base.base_trainer import BaseTrainer
@@ -182,6 +183,44 @@ class Trainer(BaseTrainer):
         else:
             self.prepare_runner(cfg, trainer, evaluator, valid_dl, valid_tester, test_tester, test_dl)
             self.cleaning_with_progress(trainer, evaluator, cfg, train_dl)
+            
+            # ===== DEBUG: Test first batch before training =====
+            logger.info("\n" + "="*70)
+            logger.info("DEBUG: Testing first batch and forward pass")
+            logger.info("="*70)
+            try:
+                train_iter = iter(train_dl)
+                batch = next(train_iter)
+                logger.info(f"✓ Raw batch loaded successfully")
+                logger.info(f"  Raw batch keys: {batch.keys()}")
+                logger.info(f"  Batch shapes: {[(k, v.shape if hasattr(v, 'shape') else type(v)) for k, v in batch.items()]}")
+                
+                # Prepare batch (this creates model_input)
+                logger.info("\n  Preparing batch...")
+                x = self.prep_batch(batch, isValid=False)
+                logger.info(f"✓ Batch prepared")
+                logger.info(f"  model_input keys: {x['model_input'].keys()}")
+                logger.info(f"  model_input shapes: {[(k, v.shape if hasattr(v, 'shape') else type(v)) for k, v in x['model_input'].items()]}")
+                
+                # Test forward pass
+                logger.info("\n  Testing model forward pass...")
+                self.model.eval()
+                with torch.no_grad():
+                    y_pred = self.model(**x["model_input"])
+                logger.info(f"✓ Forward pass succeeded!")
+                logger.info(f"  Output type: {type(y_pred)}")
+                if isinstance(y_pred, dict):
+                    logger.info(f"  Output keys: {y_pred.keys()}")
+                elif hasattr(y_pred, 'shape'):
+                    logger.info(f"  Output shape: {y_pred.shape}")
+            except Exception as e:
+                logger.error(f"✗ Error during batch/forward test:")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
+            logger.info("="*70 + "\n")
+            # ===== END DEBUG =====
+            
             trainer.run(train_dl, max_epochs=cfg.max_epochs, epoch_length=cfg.train_length)
 
     # -------------------------
@@ -200,6 +239,25 @@ class Trainer(BaseTrainer):
         self.logger.on_valid_epoch_end(trainer, evaluator)
 
         self.logger.on_completion(trainer)
+        
+        # ===== DEBUG Event Handlers =====
+        @trainer.on(Events.EPOCH_STARTED)
+        def on_epoch_started(engine):
+            logger.info(f"[EPOCH START] Epoch {engine.state.epoch}/{engine.state.max_epochs}")
+        
+        @trainer.on(Events.ITERATION_STARTED)
+        def on_iteration_started(engine):
+            if engine.state.iteration % 50 == 0:
+                logger.info(f"[ITERATION] Epoch {engine.state.epoch}, Iter {engine.state.iteration}")
+        
+        @trainer.on(Events.ITERATION_COMPLETED)
+        def on_iteration_completed(engine):
+            if engine.state.iteration % 50 == 0:
+                logger.info(f"[ITERATION DONE] Loss: {engine.state.output if isinstance(engine.state.output, (int, float)) else 'computed'}")
+        
+        @trainer.on(Events.EPOCH_COMPLETED)
+        def on_epoch_completed(engine):
+            logger.info(f"[EPOCH DONE] Epoch {engine.state.epoch} completed")
 
     # -------------------------
     # metrics helpers

@@ -27,17 +27,13 @@ def get_config():
         "strength": 0.2,
         "random_shift": 4,
         "stride": 2,
-        "max_seq_len": 256,
+        "max_seq_len": 128,  # REDUCED: From 256 to 128 for faster 1-day training
     }
 
     base_bs = 8
-    cfg.bs = int(
-        4
-        * torch.cuda.device_count()
-        # * ((torch.cuda.mem_get_info()[1] / 10**6) / 24000)
-    )
+    cfg.bs = 8  # INCREASED: From 4 to 8 for faster 1-day training
     cfg.accum = 1
-    cfg.num_workers = min(min(cfg.bs, int(10 * torch.cuda.device_count())), 10)
+    cfg.num_workers = 0  # DISABLED: For notebook compatibility
 
     cfg.gate_grad_multiplier = 1.0
 
@@ -81,7 +77,7 @@ def get_config():
         }
     )
 
-    cfg.max_epochs = 100
+    cfg.max_epochs = 2  # QUICK TRAINING: 2 epochs for 1-day completion
     cfg.model_checkpoint_dir = ""
 
     cfg.train_ds_name = "dataloaders.csldaily_video_dataset"
@@ -162,7 +158,7 @@ def get_config():
     cfg.grad_clip_value = 1.0
     cfg.logger_name = ["text"] #["wandb"]
     cfg.resume = True
-    cfg.train_length = None
+    cfg.train_length = 100  # LIMITED: 100 batches for 1-day training
     cfg.val_length = None
     cfg.log_every = 100
     cfg.save_ckpt = True

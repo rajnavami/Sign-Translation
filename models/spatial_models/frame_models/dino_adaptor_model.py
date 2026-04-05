@@ -96,8 +96,8 @@ class Model(nn.Module):
             # Freeze flow DINO
             for param in self.flow_dino.parameters():
                 param.requires_grad = False
-            # Fusion layer: concat RGB + Flow features
-            self.fusion_lin = nn.Linear(num_features * 2, out_dim)
+            # Fusion layer: concat RGB + Flow features (using projected out_dim features)
+            self.fusion_lin = nn.Linear(out_dim * 2, out_dim)
             self.fusion_bn = nn.BatchNorm1d(out_dim)
 
         logger.info(f"ckpt_dir: {ckpt_dir}")
@@ -118,9 +118,10 @@ class Model(nn.Module):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
-                # Cast frozen params to bf16 (correctly) to save memory if supported
-                if torch.cuda.is_available() and torch.cuda.is_bf16_supported() and param.is_floating_point():
-                    param.data = param.data.to(dtype=torch.bfloat16)
+                # Note: Do NOT cast frozen params to bf16 here.
+                # Let autocast in trainer handle precision; mixing input dtype (float32)
+                # with param dtype (bf16) causes Conv2d errors.
+
 
         if freeze:
             for _, param in self.named_parameters():
@@ -152,6 +153,10 @@ class Model(nn.Module):
             if idist.get_world_size() > 0:
                 idist.barrier()
 
+            return local_path
+        else:
+            return ckpt_dir
+
     def forward(self, list_of_frames: List[torch.Tensor], max_len: Optional[int] = 1024):
         """
         list_of_frames: list length B, each element is a tensor [Ti, 3, H, W]
@@ -180,9 +185,9 @@ class Model(nn.Module):
                         img1 = seq[i]  # [3, H, W]
                         img2 = seq[i+1]  # [3, H, W]
                         with torch.no_grad():
-                            predictions = self.flow_model(img1, img2)
-                            flow = predictions[-1].unsqueeze(0)  # [1, 2, H, W]
-                        seq_flows.append(flow.squeeze(0))
+                            predictions = self.flow_model(img1.unsqueeze(0), img2.unsqueeze(0))
+                            flow = predictions[-1].squeeze(0)  # [2, H, W]
+                        seq_flows.append(flow)
                     # For the last frame, use the previous flow
                     seq_flows.append(seq_flows[-1] if seq_flows else torch.zeros_like(seq[0][:2]))
                     flow_tensor = torch.stack(seq_flows, dim=0)  # [Ti, 2, H, W]
@@ -218,7 +223,13 @@ class Model(nn.Module):
         y_padded = []
         for i in range(B):
             yi = y[offsets[i] : offsets[i + 1]]  # [Ti, out_dim]
-            y_padded.append(self.pad(yi, max_len))
+            if yi.size(0) < max_len:
+                pad_size = max_len - yi.size(0)
+                padding = torch.zeros((pad_size, yi.size(1)), device=yi.device, dtype=yi.dtype)
+                yi = torch.cat([yi, padding], dim=0)
+            elif yi.size(0) > max_len:
+                yi = yi[:max_len]
+            y_padded.append(yi)
 
         y_out = torch.stack(y_padded, dim=0)  # [B, max_len, out_dim]
 
