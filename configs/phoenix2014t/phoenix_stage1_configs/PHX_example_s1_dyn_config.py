@@ -55,7 +55,7 @@ def get_config():
             "num_cycles":       1,
             "start_value_mult": 0.7,
             "end_value_mult":   0.7,
-            "warmup_epochs":    1,
+            "warmup_epochs":    5,
         }
     )
 
@@ -80,7 +80,7 @@ def get_config():
         }
     )
 
-    cfg.max_epochs           = 5
+    cfg.max_epochs           = 100
     cfg.model_checkpoint_dir = ""
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
@@ -177,8 +177,8 @@ def get_config():
     cfg.grad_clip_value = 1.0
     cfg.logger_name     = ["text", "tensorboard"]
     cfg.resume          = True
-    cfg.train_length    = 50
-    cfg.val_length      = 20
+    cfg.train_length    = None
+    cfg.val_length      = None
     cfg.log_every       = 100
     cfg.save_ckpt       = True
     cfg.score_factor    = 1

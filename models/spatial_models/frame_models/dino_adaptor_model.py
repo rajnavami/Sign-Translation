@@ -37,7 +37,7 @@ class FlowBranch(nn.Module):
         )
         self.dropout = nn.Dropout(p=0.3)
         self.proj    = nn.Linear(128 * 4 * 4, out_dim)
-        self.bn      = nn.BatchNorm1d(out_dim)
+        self.bn      = nn.LayerNorm(out_dim)
 
     def forward(self, flow: torch.Tensor) -> torch.Tensor:
         x = self.encoder(flow)
@@ -56,7 +56,7 @@ class GatedFusion(nn.Module):
         super().__init__()
         self.gate = nn.Parameter(torch.full((dim,), -4.0))
         self.proj = nn.Linear(dim * 2, dim)
-        self.bn   = nn.BatchNorm1d(dim)
+        self.bn   = nn.LayerNorm(dim)
 
     def forward(self, rgb: torch.Tensor, flow: torch.Tensor) -> torch.Tensor:
         gate      = torch.sigmoid(self.gate)
@@ -99,7 +99,7 @@ class Model(nn.Module):
         )
         num_features = self.spatial_model.num_features
         self.lin = nn.Linear(num_features, out_dim)
-        self.bn  = nn.BatchNorm1d(out_dim)
+        self.bn  = nn.LayerNorm(out_dim)
 
         self.use_flow = use_flow
         if self.use_flow:
