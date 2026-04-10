@@ -22,7 +22,7 @@ def get_config():
     code_path     = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
-    cfg.log_name     = "dinov3_optical_flow"
+    cfg.log_name     = "dinov3_optical_flow_v2"
     ckpt_path        = get_checkpoint_path(base_name, cfg.name)
     lmdb_path        = get_lmdb_path()
     cfg.save_dir     = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -38,11 +38,11 @@ def get_config():
         "strength":     0.2,
         "random_shift": 4,
         "stride":       2,
-        "max_seq_len":  256,
+        "max_seq_len":  128,
     }
 
     base_bs     = 8
-    cfg.bs      = int(8 * torch.cuda.device_count())
+    cfg.bs      = int(4 * torch.cuda.device_count())
     cfg.accum   = 1
     cfg.num_workers = min(min(cfg.bs, int(10 * torch.cuda.device_count())), 10)
 
@@ -55,7 +55,7 @@ def get_config():
             "num_cycles":       1,
             "start_value_mult": 0.7,
             "end_value_mult":   0.7,
-            "warmup_epochs":    5,
+            "warmup_epochs":    1,
         }
     )
 
@@ -80,7 +80,7 @@ def get_config():
         }
     )
 
-    cfg.max_epochs           = 100
+    cfg.max_epochs           = 5
     cfg.model_checkpoint_dir = ""
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
@@ -177,8 +177,8 @@ def get_config():
     cfg.grad_clip_value = 1.0
     cfg.logger_name     = ["text", "tensorboard"]
     cfg.resume          = True
-    cfg.train_length    = None
-    cfg.val_length      = None
+    cfg.train_length    = 50
+    cfg.val_length      = 20
     cfg.log_every       = 100
     cfg.save_ckpt       = True
     cfg.score_factor    = 1
