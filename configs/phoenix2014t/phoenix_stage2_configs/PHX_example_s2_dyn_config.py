@@ -17,7 +17,7 @@ def get_config():
     base_name = Path(os.path.realpath(__file__)).parent.name
     code_path = str(Path(os.path.realpath(__file__)).resolve().parents[3])
 
-    cfg.log_name = "signcl_maxlen64_margin_org"
+    cfg.log_name = "dinov3_optical_flow_rank16_alllayers_stage2"
     ckpt_path = get_checkpoint_path(base_name, cfg.name)
     lmdb_path = get_lmdb_path()
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
@@ -86,7 +86,7 @@ def get_config():
     )
 
     cfg.max_epochs = 100
-    cfg.model_checkpoint_dir = ""
+    cfg.model_checkpoint_dir = "checkpoint_DINOv3_optical_flow_v3/phoenix_stage1_configs/PHX_example_s1_dyn_config/latest_epoch_checkpoint_177400.pt"
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
     cfg.valid_ds_name = "dataloaders.phoenix_video_dataset"
