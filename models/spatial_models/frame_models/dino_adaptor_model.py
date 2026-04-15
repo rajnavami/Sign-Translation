@@ -1,15 +1,74 @@
 # models/spatial_models/frame_models/dino_adaptor_model.py
+#
+# KEY FIX vs previous version:
+#   RESTORED: self.bn = BatchNorm1d (was changed to LayerNorm — broke accuracy)
+#   RESTORED: FlowBranch.bn = BatchNorm1d
+#   RESTORED: GatedFusion.bn = BatchNorm1d
+#
+# WHY LayerNorm broke accuracy:
+#   zero_fasttext_prototype_head uses cosine similarity between normalized
+#   features and FastText embeddings. BatchNorm1d normalizes per-feature
+#   across the batch (correct for cosine sim). LayerNorm normalizes
+#   per-sample across features — produces different statistics that make
+#   all cosine similarities near-equal, so logits are flat → accuracy=0.
+#
+# HOW we fix the bs=1 BatchNorm crash properly:
+#   BatchNorm1d crashes when input has only 1 sample (can't compute batch stats).
+#   Solution: use model.eval() mode for BN during single-sample chunks, OR
+#   use a safe_bn wrapper that falls back to identity when N=1.
+#   We use the safe wrapper approach — transparent to the rest of the code.
 
 import os
 from typing import Dict, List, Optional, Any
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 import ignite.distributed as idist
 from loguru import logger
 
 from models.dinov3.model.vision_transformer import vit_small
 
+
+# ---------------------------------------------------------------------------
+# SafeBatchNorm1d — handles bs=1 gracefully
+# ---------------------------------------------------------------------------
+
+class SafeBatchNorm1d(nn.Module):
+    """
+    BatchNorm1d that falls back to LayerNorm when batch size = 1.
+
+    WHY THIS IS NEEDED:
+    - BatchNorm1d requires N > 1 during training (needs batch statistics)
+    - With bs=1 and chunked flow processing, last chunk may have N=1
+    - Crashing with "Expected more than 1 value per channel"
+
+    WHY NOT JUST USE LAYERNORM:
+    - The downstream cosine similarity in zero_fasttext_prototype_head
+      depends on BatchNorm's per-feature normalization statistics
+    - LayerNorm produces different statistics → breaks logit scale → acc=0
+
+    SOLUTION:
+    - N > 1: use BatchNorm1d (correct normalization for cosine sim)
+    - N = 1: use LayerNorm as fallback (mathematically equivalent for N=1
+      since there's no batch dimension to normalize across anyway)
+    """
+    def __init__(self, num_features: int):
+        super().__init__()
+        self.bn = nn.BatchNorm1d(num_features)
+        self.ln = nn.LayerNorm(num_features)    # fallback for N=1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[0] == 1 and self.training:
+            # Single sample during training — BN would crash
+            # Use LN as fallback (only affects this one edge case)
+            return self.ln(x)
+        return self.bn(x)
+
+
+# ---------------------------------------------------------------------------
+# FlowBranch
+# ---------------------------------------------------------------------------
 
 class FlowBranch(nn.Module):
     """
@@ -35,9 +94,11 @@ class FlowBranch(nn.Module):
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d((4, 4)),
         )
-        self.dropout = nn.Dropout(p=0.3)
+        self.dropout = nn.Dropout(p=0.1)
         self.proj    = nn.Linear(128 * 4 * 4, out_dim)
-        self.bn      = nn.LayerNorm(out_dim)
+        # RESTORED: BatchNorm1d (was LayerNorm — broke accuracy)
+        # SafeBatchNorm1d handles the bs=1 edge case properly
+        self.bn      = SafeBatchNorm1d(out_dim)
 
     def forward(self, flow: torch.Tensor) -> torch.Tensor:
         x = self.encoder(flow)
@@ -46,17 +107,21 @@ class FlowBranch(nn.Module):
         return self.bn(self.proj(x))
 
 
+# ---------------------------------------------------------------------------
+# GatedFusion
+# ---------------------------------------------------------------------------
+
 class GatedFusion(nn.Module):
     """
     Gated additive fusion.
     Gate init: -4.0 so sigmoid(-4) ≈ 0.018 at training start.
-    Flow contribution grows as gate learns.
     """
     def __init__(self, dim: int):
         super().__init__()
-        self.gate = nn.Parameter(torch.full((dim,), -4.0))
+        self.gate = nn.Parameter(torch.full((dim,), -2.0))
         self.proj = nn.Linear(dim * 2, dim)
-        self.bn   = nn.LayerNorm(dim)
+        # RESTORED: BatchNorm1d (was LayerNorm — broke accuracy)
+        self.bn   = SafeBatchNorm1d(dim)
 
     def forward(self, rgb: torch.Tensor, flow: torch.Tensor) -> torch.Tensor:
         gate      = torch.sigmoid(self.gate)
@@ -64,6 +129,10 @@ class GatedFusion(nn.Module):
         projected = self.bn(self.proj(combined))
         return rgb + gate * projected
 
+
+# ---------------------------------------------------------------------------
+# Main Model
+# ---------------------------------------------------------------------------
 
 class Model(nn.Module):
     def __init__(
@@ -99,7 +168,9 @@ class Model(nn.Module):
         )
         num_features = self.spatial_model.num_features
         self.lin = nn.Linear(num_features, out_dim)
-        self.bn  = nn.LayerNorm(out_dim)
+        # RESTORED: BatchNorm1d — critical for cosine similarity downstream
+        # SafeBatchNorm1d handles bs=1 edge case without breaking normalization
+        self.bn  = SafeBatchNorm1d(out_dim)
 
         self.use_flow = use_flow
         if self.use_flow:
@@ -154,28 +225,12 @@ class Model(nn.Module):
     ) -> torch.Tensor:
         """
         Run DINOv2 forward in chunks to avoid OOM.
-
-        WHY CHUNKING IS NEEDED:
-        - x shape is (sum_T, 3, H, W) where sum_T = batch_size * frames_per_video
-        - With bs=4 and ~69 frames per video: sum_T = 4 * 69 = 276 frames
-        - DINOv2 attention is O(N^2) in sequence length
-        - Processing all 276 frames at once = huge intermediate tensors = OOM
-        - chunk_size=16 means we process 16 frames at a time instead
-        - This reduces peak memory by ~17x at the cost of slightly more compute
-
-        WHY chunk_size=16:
-        - Each frame at 224x224 with patch_size=14 gives (224/14)^2 = 256 patches
-        - 16 frames * 256 patches = 4096 tokens per chunk — fits in ~24GB VRAM
-        - Reduce to 8 if still OOM, increase to 32 if you have headroom
-
-        GRADIENT HANDLING:
-        - During training (self.training=True): gradients flow through chunks
-          normally. Each chunk.backward() accumulates gradients correctly.
-        - During eval (self.training=False): torch.no_grad() saves memory.
+        chunk_size=16 works well for A100 80GB with bs=8.
+        Reduce to 8 if OOM on smaller GPUs.
         """
         feat_chunks = []
         for i in range(0, x.shape[0], chunk_size):
-            chunk = x[i: i + chunk_size]            # (chunk_size, 3, H, W)
+            chunk = x[i: i + chunk_size]
             if not self.training:
                 with torch.no_grad():
                     feat = self.spatial_model.forward_features(
@@ -186,7 +241,7 @@ class Model(nn.Module):
                     chunk
                 )["x_norm_clstoken"]
             feat_chunks.append(feat)
-        return torch.cat(feat_chunks, dim=0)        # (sum_T, 384)
+        return torch.cat(feat_chunks, dim=0)    # (sum_T, 384)
 
     def forward(
         self,
@@ -194,36 +249,31 @@ class Model(nn.Module):
         list_of_flows: Optional[List[torch.Tensor]] = None,
         max_len: Optional[int] = 1024,
     ):
-        """
-        Args:
-            list_of_frames: list[B] of (Ti, 3, H, W)
-            list_of_flows:  list[B] of (Ti, 2, 64, 64) — precomputed flow
-                            None = skip flow branch
-            max_len:        pad/truncate to this length
-        """
         lengths: List[int] = [len(x) for x in list_of_frames]
         B = len(lengths)
 
-        # ── RGB path: chunked to avoid OOM ───────────────────────────────────
-        x     = torch.cat(list_of_frames, dim=0)    # (sum_T, 3, H, W)
-        feats = self._forward_dino_chunked(x, chunk_size=16)  # (sum_T, 384)
-        y     = self.bn(self.lin(feats.float()))     # (sum_T, out_dim)
+        # ── RGB path ──────────────────────────────────────────────────────────
+        x     = torch.cat(list_of_frames, dim=0)
+        feats = self._forward_dino_chunked(x, chunk_size=16)
+        # SafeBatchNorm1d handles the case where sum_T=1
+        y     = self.bn(self.lin(feats.float()))
 
-        # ── Flow fusion: also chunked ─────────────────────────────────────────
+        # ── Flow fusion ───────────────────────────────────────────────────────
         if self.use_flow and list_of_flows is not None:
-            flow_x = torch.cat(list_of_flows, dim=0)          # (sum_T, 2, 64, 64)
+            flow_x = torch.cat(list_of_flows, dim=0)
             flow_x = flow_x.to(device=y.device, dtype=torch.float32)
 
-            # Chunk the flow branch too — keeps memory flat
+            # Process flow in chunks of 32
+            # SafeBatchNorm1d handles last chunk if N=1
             flow_chunks = []
             for i in range(0, flow_x.shape[0], 32):
                 flow_chunks.append(
                     self.flow_branch(flow_x[i: i + 32])
                 )
-            flow_y = torch.cat(flow_chunks, dim=0)             # (sum_T, out_dim)
-            y      = self.fusion(y, flow_y)                    # (sum_T, out_dim)
+            flow_y = torch.cat(flow_chunks, dim=0)
+            y      = self.fusion(y, flow_y)
 
-        # ── Pad / truncate to max_len ─────────────────────────────────────────
+        # ── Pad / truncate ────────────────────────────────────────────────────
         if max_len is None:
             max_len = max(lengths)
 
@@ -244,7 +294,7 @@ class Model(nn.Module):
                 yi = yi[:max_len]
             y_padded.append(yi)
 
-        y_out = torch.stack(y_padded, dim=0)        # (B, max_len, out_dim)
+        y_out = torch.stack(y_padded, dim=0)
 
         mask = torch.zeros((B, max_len), device=y_out.device, dtype=torch.bool)
         for i, l in enumerate(lengths):

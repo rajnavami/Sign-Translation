@@ -1,23 +1,13 @@
 # trainer/psuedo_gloss_trainer.py
 #
-# CHANGES vs original:
-#   ONLY prep_batch is changed — 3 lines added to extract flow from batch
-#   and include it in model_input.
+# CHANGES vs previous version:
+#   ADDED: init_optimizer override with separate LR for flow parameters
+#          Flow branch (randomly initialized) gets 5x higher LR than
+#          the rest of the model (pretrained DINOv2 + LoRA).
+#          This allows flow to learn faster without destabilizing
+#          the pretrained backbone.
 #
-#   train_step, eval_step, test_step are IDENTICAL to original — they all
-#   call prep_batch so they get flow automatically without any changes.
-#
-# How flow flows through this trainer:
-#   batch["flow"]              (list of (T, 2, 64, 64) tensors, from dataloader)
-#       -> prep_batch extracts it
-#       -> model_input["list_of_flows"]
-#       -> self.model(**x["model_input"])
-#       -> dino_adaptor_model.forward(list_of_frames, list_of_flows=...)
-#       -> FlowBranch + GatedFusion
-#
-# If flow_lmdb_dir is not set in config: batch has no "flow" key,
-# batch.get("flow", None) returns None, model_input["list_of_flows"] = None,
-# dino_adaptor_model skips the flow branch entirely. Zero behavioural change.
+# All other methods unchanged.
 
 import datetime
 import os
@@ -43,15 +33,14 @@ class Trainer(BaseTrainer):
     """
     Updated for DINOv3 + LoRA + optical flow integration.
 
-    Key fixes/improvements (carried over from previous version):
+    Key fixes/improvements:
     - safer yaml saving via yaml.safe_dump
     - autocast device_type works on CUDA/CPU
     - auto_model sync_bn only when distributed > 1
     - optional find_unused_parameters via cfg
     - zero_grad(set_to_none=True) for better memory behavior
-
-    New in this version:
     - prep_batch extracts flow from batch and passes to model_input
+    - init_optimizer: separate 5x LR for flow_branch + fusion params
     """
 
     def __init__(self, local_rank, *args, **kwargs):
@@ -94,7 +83,7 @@ class Trainer(BaseTrainer):
 
         self.init_models()
         self.init_criterion(cfg)
-        self.init_optimizer(cfg)
+        self.init_optimizer(cfg)   # uses overridden version below
 
         trainer      = Engine(self.train_step)
         evaluator    = Engine(self.eval_step)
@@ -204,7 +193,6 @@ class Trainer(BaseTrainer):
                 logger.info(f"✓ Raw batch loaded successfully")
                 logger.info(f"  Raw batch keys: {batch.keys()}")
 
-                # Log whether flow is present in this batch
                 if "flow" in batch:
                     logger.info(
                         f"  Flow present: {len(batch['flow'])} tensors, "
@@ -217,7 +205,6 @@ class Trainer(BaseTrainer):
                 logger.info(f"✓ Batch prepared")
                 logger.info(f"  model_input keys: {x['model_input'].keys()}")
 
-                # Log flow status in model_input
                 if x["model_input"].get("list_of_flows") is not None:
                     logger.info("  ✓ list_of_flows present in model_input")
                 else:
@@ -323,32 +310,91 @@ class Trainer(BaseTrainer):
             self.model, find_unused_parameters=find_unused, sync_bn=sync_bn
         )
 
-    # ── prep_batch (ONLY CHANGED METHOD) ─────────────────────────────────────
+    # ── init_optimizer (OVERRIDDEN — adds separate LR for flow) ──────────────
+
+    def init_optimizer(self, cfg):
+        """
+        Override base init_optimizer to give flow_branch and fusion
+        a 5x higher learning rate than the rest of the model.
+
+        WHY SEPARATE LR FOR FLOW:
+        - flow_branch and fusion are randomly initialized
+        - DINOv2 backbone + LoRA are pretrained — need small LR to avoid
+          forgetting pretrained features
+        - Flow branch starts from scratch — needs higher LR to learn
+          meaningful representations in the same number of epochs
+        - Without this, flow learns too slowly relative to the backbone
+          and contributes little by epoch 100
+
+        WHAT THIS DOES:
+        - flow_branch params: lr = cfg.lr * 5 (e.g. 3e-4 * 5 = 1.5e-3)
+        - fusion params:      lr = cfg.lr * 5
+        - everything else:    lr = cfg.lr     (e.g. 3e-4, unchanged)
+
+        If use_flow=False, no flow/fusion params exist so this falls back
+        to identical behaviour as the original single-group optimizer.
+        """
+        # Split parameters into flow and non-flow groups
+        flow_param_names = []
+        flow_params      = []
+        other_params     = []
+
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if "flow_branch" in name or "fusion" in name:
+                flow_params.append(param)
+                flow_param_names.append(name)
+            else:
+                other_params.append(param)
+
+        base_lr      = cfg.optimizer_params["lr"]
+        weight_decay = cfg.optimizer_params.get("weight_decay", 0.001)
+        flow_lr      = base_lr * 5.0   # 5x LR for flow branch
+
+        if flow_params:
+            # Two param groups: flow (5x LR) + everything else (base LR)
+            param_groups = [
+                {"params": other_params, "lr": base_lr},
+                {"params": flow_params,  "lr": flow_lr},
+            ]
+            logger.info(
+                f"Optimizer: {len(other_params)} other params at lr={base_lr}, "
+                f"{len(flow_params)} flow params at lr={flow_lr}"
+            )
+            logger.info(f"Flow param names: {flow_param_names[:5]}...")
+        else:
+            # No flow params (use_flow=False) — single group, same as original
+            param_groups = [{"params": other_params, "lr": base_lr}]
+            logger.info(
+                f"Optimizer: no flow params found, "
+                f"single group at lr={base_lr}"
+            )
+
+        self.optimizer = torch.optim.AdamW(
+            param_groups,
+            weight_decay=weight_decay,
+        )
+
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print("MODEL:", count_parameters(self.model))
+
+        if not self.support_bfloat:
+            self.scaler = torch.cuda.amp.GradScaler()
+        else:
+            self.scaler = None
+
+        self.grad_clip_norm  = cfg.grad_clip_norm  if "grad_clip_norm"  in cfg else None
+        self.grad_clip_value = cfg.grad_clip_value if "grad_clip_value" in cfg else None
+
+    # ── prep_batch (flow extraction) ──────────────────────────────────────────
 
     def prep_batch(self, batch, isValid=False, cuda=True):
-        """
-        Prepares the batch dict into model_input and targets.
-
-        CHANGE vs original: extracts flow from batch and adds list_of_flows
-        to model_input. This is the ONLY change in this entire file.
-
-        Why here and not in train_step/eval_step/test_step?
-        - All three steps call prep_batch, so adding flow here means all
-          three automatically get flow without any code duplication.
-        - convert_tensor at the end moves everything to GPU, including the
-          flow tensors — ignite handles lists of tensors correctly.
-        """
         idx, frames = (batch["index"], batch["frames"])
         frame_features = frames
 
-        # ── NEW: extract precomputed flow from batch ──────────────────────────
-        # batch["flow"] is a list of (T, 2, 64, 64) tensors — one per sample.
-        # It is present only when flow_lmdb_dir is set in the config.
-        # .get() with default None means this is fully backward compatible:
-        # if flow is not in the batch, list_of_flows = None and the model
-        # skips the flow branch entirely (no error, no overhead).
         list_of_flows = batch.get("flow", None)
-        # ── END NEW ───────────────────────────────────────────────────────────
 
         res = {
             "model_input": {
@@ -356,12 +402,7 @@ class Trainer(BaseTrainer):
                 "max_len": torch.tensor(
                     self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
                 ),
-                # ── NEW: pass flow into model_input ───────────────────────────
-                # dino_adaptor_model.forward() accepts list_of_flows as an
-                # optional kwarg. When None, it skips FlowBranch + GatedFusion.
-                # convert_tensor (below) will move flow tensors to GPU.
                 "list_of_flows": list_of_flows,
-                # ── END NEW ───────────────────────────────────────────────────
             },
             "targets": {
                 "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
@@ -377,20 +418,20 @@ class Trainer(BaseTrainer):
             else res
         )
 
-    # ── Training steps (ALL UNCHANGED — they just call prep_batch) ───────────
+    # ── Training steps (unchanged) ────────────────────────────────────────────
 
     def train_step(self, engine, batch):
         engine.state.batch  = None
         engine.state.output = None
         self.model.train()
 
-        x = self.prep_batch(batch, isValid=False)   # flow is now inside x
+        x = self.prep_batch(batch, isValid=False)
 
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
 
         with torch.autocast(device_type=device_type, dtype=self.dtype):
             self.optimizer.zero_grad(set_to_none=True)
-            y_pred = self.model(**x["model_input"])  # list_of_flows passed here
+            y_pred = self.model(**x["model_input"])
 
         loss, dict_losses = self.loss_fn(y_pred, x["targets"])
 

@@ -15,12 +15,12 @@ def get_sign_encoder():
     dropout    = 0.1
     num_heads  = 8
 
-    adaptor_layers = [9, 10, 11]  # top 3 blocks for ViT-S depth=12
+    adaptor_layers = list(range(12))  # # ALL 12 layers
     adapt_params = {
         "w_lora":    True,
         "w_lora_ff": True,
-        "lora_rank": 4,
-        "lora_a":    4.0,
+        "lora_rank": 16,
+        "lora_a":    16.0,
         "lora_drop": 0.05,
         "rng_init":  False,
     }

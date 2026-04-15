@@ -22,7 +22,7 @@ def get_config():
     code_path     = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
-    cfg.log_name     = "dinov3_optical_flow_v2"
+    cfg.log_name     = "dinov3_optical_flow_rank16_alllayers"
     ckpt_path        = get_checkpoint_path(base_name, cfg.name)
     lmdb_path        = get_lmdb_path()
     cfg.save_dir     = f"{ckpt_path}/{base_name}/{cfg.name}"
