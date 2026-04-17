@@ -472,6 +472,8 @@ class Trainer(BaseTrainer):
                 "gt_text_mask":  gt_text_mask,
             },
         }
+        # if list_of_flows is not None:
+        #     res["model_input"]["list_of_flows"] = list_of_flows
 
         return (
             convert_tensor(res, device=idist.device(), non_blocking=True)
