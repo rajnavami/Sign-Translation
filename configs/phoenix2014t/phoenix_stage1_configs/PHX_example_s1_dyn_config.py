@@ -1,14 +1,12 @@
 # configs/PHX/PHX_example_s1_dyn_config.py
 #
-# CHANGES vs current version:
-#   ADDED: "flow_lmdb_dir" inside ds_params for train, valid, AND test splits.
-#          Without this, phoenix_video_dataset.py never loads flow, so
-#          batch["flow"] is always absent and list_of_flows is always None.
+# Stage 1 retraining with rank=16, all 12 layers + optical flow
+# Saves to a NEW checkpoint directory: checkpoint_DINOv3_optical_flow_rank16
+# so the old rank=4 checkpoint is preserved and not overwritten.
 
 from ml_collections import config_dict
 from pathlib import Path
 import os
-import json
 import numpy as np
 import torch
 from configs.base.base_utils import *
@@ -22,10 +20,12 @@ def get_config():
     code_path     = str(Path(os.path.realpath(__file__)).resolve().parents[3])
     logger.info(f"code_path: {code_path}")
 
-    cfg.log_name     = "dinov3_optical_flow_rank16_alllayers"
-    ckpt_path        = get_checkpoint_path(base_name, cfg.name)
-    lmdb_path        = get_lmdb_path()
-    cfg.save_dir     = f"{ckpt_path}/{base_name}/{cfg.name}"
+    # NEW log name — identifies this as the rank=16 run
+    cfg.log_name  = "dinov3_optical_flow_rank16_alllayers_log_v1"
+    ckpt_path     = get_checkpoint_path(base_name, cfg.name)
+    lmdb_path     = get_lmdb_path()
+    cfg.save_dir  = f"{ckpt_path}/{base_name}/{cfg.name}"
+    print("cfg.save_dir", cfg.save_dir)
     logger.info(f"lmdb_path: {lmdb_path}")
 
     cfg.main_runner  = "trainer.psuedo_gloss_trainer"
@@ -38,12 +38,11 @@ def get_config():
         "strength":     0.2,
         "random_shift": 4,
         "stride":       2,
-        "max_seq_len":  128,
+        "max_seq_len":  256,    # restored to full 256
     }
 
-    base_bs     = 8
-    cfg.bs      = int(4 * torch.cuda.device_count())
-    cfg.accum   = 1
+    cfg.bs          = int(8 * torch.cuda.device_count())
+    cfg.accum       = 1
     cfg.num_workers = min(min(cfg.bs, int(10 * torch.cuda.device_count())), 10)
 
     cfg.gate_grad_multiplier = 1.0
@@ -81,25 +80,22 @@ def get_config():
     )
 
     cfg.max_epochs           = 100
+    # Empty — start fresh, no warm-starting from previous checkpoint
     cfg.model_checkpoint_dir = ""
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
     cfg.valid_ds_name = "dataloaders.phoenix_video_dataset"
     cfg.test_ds_name  = "dataloaders.phoenix_video_dataset"
 
-    # ── Train split ───────────────────────────────────────────────────────────
     train_ds_params = {
-        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.train.corpus.csv",
+        "csv_dir":          f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.train.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
         "sep":  "|",
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            "isValid": False,
-            # NEW — tells phoenix_video_dataset.py to load flow alongside frames.
-            # Must match the --flow_lmdb_dir you used in precompute_flow.py.
-            # Remove this line (or set to None) to disable flow loading.
-            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
+            "isValid":        False,
+            "flow_lmdb_dir":  f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle":     True,
         "num_workers": cfg.num_workers,
@@ -108,18 +104,15 @@ def get_config():
     }
     cfg.train_ds_params = config_dict.ConfigDict(train_ds_params)
 
-    # ── Validation split ──────────────────────────────────────────────────────
     valid_ds_params = {
-        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.dev.corpus.csv",
+        "csv_dir":          f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.dev.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
         "sep":  "|",
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            "isValid": True,
-            # NEW — flow must be loaded for validation too so the model
-            # behaves consistently between train and eval
-            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
+            "isValid":        True,
+            "flow_lmdb_dir":  f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle":     False,
         "num_workers": cfg.num_workers,
@@ -128,17 +121,15 @@ def get_config():
     }
     cfg.valid_ds_params = config_dict.ConfigDict(valid_ds_params)
 
-    # ── Test split ────────────────────────────────────────────────────────────
     test_ds_params = {
-        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.test.corpus.csv",
+        "csv_dir":          f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.test.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
         "sep":  "|",
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            "isValid": True,
-            # NEW — same flow directory for test
-            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
+            "isValid":        True,
+            "flow_lmdb_dir":  f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle":     False,
         "num_workers": cfg.num_workers,

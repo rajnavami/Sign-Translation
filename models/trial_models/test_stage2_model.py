@@ -1,6 +1,13 @@
+# models/trial_models/test_stage2_model.py
+#
+# CHANGES vs original:
+#   CHANGED: forward() accepts list_of_flows and passes it to sign_model
+#   Everything else identical
+
 from torch import nn
 import importlib
 import torch
+
 
 class Model(nn.Module):
     def __init__(
@@ -22,7 +29,9 @@ class Model(nn.Module):
         mod = importlib.import_module(stage1_name, package=None)
         self.sign_model = mod.Model(**stage1_params)
         if stage1_ckpt is not None:
-            self.sign_model.load_state_dict(torch.load(stage1_ckpt,map_location='cpu')['model'])
+            self.sign_model.load_state_dict(
+                torch.load(stage1_ckpt, map_location="cpu")["model"]
+            )
         self.sign_model.post_model = None
 
         if freeze:
@@ -36,13 +45,15 @@ class Model(nn.Module):
         for name, param in self.lang_model.named_parameters():
             param.requires_grad = False
         self.lang_model.init_adaptor(**adaptor_params)
+
         lang_dim = self.lang_model.embed_dim
         sign_dim = self.sign_model.dim
 
         post_mod = importlib.import_module(post_name, package=None)
-        self.post_model = post_mod.Model(**post_params, in_dim=sign_dim, out_dim=lang_dim)
+        self.post_model = post_mod.Model(
+            **post_params, in_dim=sign_dim, out_dim=lang_dim
+        )
         self.pretext_length = pretext_length
-
 
     def forward(
         self,
@@ -51,10 +62,20 @@ class Model(nn.Module):
         frame_features,
         frame_mask,
         max_len,
+        list_of_flows=None,     # NEW — received from complete_translation_trainer
+                                #       passed to sign_model for flow fusion
         generate=False,
         gen_params={},
     ):
-        dict_sign_output = self.sign_model(frame_features, max_len=max_len)
+        # CHANGED: pass list_of_flows to sign_model
+        # sign_model is test_pretraining.Model which passes it to
+        # basic_sign_encoder -> dino_adaptor_model
+        # When None: identical to original (flow branch skipped)
+        dict_sign_output = self.sign_model(
+            frame_features,
+            max_len=max_len,
+            list_of_flows=list_of_flows,    # NEW
+        )
 
         post_features, post_mask = (
             dict_sign_output["enc_output"]["post_output"]["x"],
@@ -78,9 +99,9 @@ class Model(nn.Module):
                         gates.append(param)
             gates = torch.stack(gates, dim=0)
             return {
-                "logits": output.logits[:, self.pretext_length - 1 :],
+                "logits":     output.logits[:, self.pretext_length - 1:],
                 "enc_output": dict_sign_output,
-                "gates": gates,
+                "gates":      gates,
             }
         else:
             output_ids = self.lang_model.generate(
@@ -91,8 +112,7 @@ class Model(nn.Module):
                 use_cache=False,
                 **gen_params,
             )
-
             return {
-                "output_ids": output_ids[:, self.pretext_length :],
+                "output_ids": output_ids[:, self.pretext_length:],
                 "enc_output": dict_sign_output,
             }
