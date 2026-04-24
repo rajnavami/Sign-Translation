@@ -1,14 +1,12 @@
 # trainer/complete_translation_trainer.py
 #
-# CHANGES vs original:
-#   ONLY prep_batch is changed — 3 lines added to extract flow from batch
-#   and include it in model_input["list_of_flows"].
-#
-#   Everything else — init, metrics, init_models, train_step, eval_step,
-#   test_step — is IDENTICAL to the original.
-#
-# Same pattern as psuedo_gloss_trainer.py: flow is extracted once in
-# prep_batch and flows automatically into all three steps.
+# CHANGES vs previous version:
+#   FIX: prep_batch now pops list_of_flows BEFORE convert_tensor and
+#        reattaches it AFTER. This fixes:
+#        TypeError: x must contain torch.Tensor, dicts or lists; found NoneType
+#        convert_tensor cannot handle None values inside dicts.
+#        When flow is present (list of tensors), it is moved to GPU manually.
+#        When flow is None, it is passed through unchanged.
 
 import datetime
 import torch
@@ -143,6 +141,10 @@ class Trainer(BaseTrainer):
                 ckpt, _, _ = get_best_checkpoint_details(
                     cfg.save_dir, best_checkpoint_name="_result_checkpoint_"
                 )
+                print("DEBUG ckpt:", ckpt)
+                print("DEBUG save_dir:", cfg.save_dir)
+                import os
+                print("DEBUG exists:", os.path.exists(ckpt) if ckpt else "EMPTY")
                 self.model.load_state_dict(
                     torch.load(ckpt, map_location="cpu")["model"]
                 )
@@ -356,7 +358,7 @@ class Trainer(BaseTrainer):
         )
         if "pretext" in self.cfg and len(self.cfg.pretext) > 0:
             self.pretext = self.cfg.pretext
-            self.pretext_tokens  = self.tokenizer(self.pretext)["input_ids"]
+            self.pretext_tokens  = self.tokenizer(self.cfg.pretext)["input_ids"]
             self.pretext_length  = len(self.pretext_tokens)
             if self.cfg.pretext[-1] == " ":
                 self.pretext_tokens = self.pretext_tokens[:-1]
@@ -386,23 +388,18 @@ class Trainer(BaseTrainer):
             self.model, find_unused_parameters=False, sync_bn=True
         )
 
-    # ── prep_batch (ONLY CHANGED METHOD) ─────────────────────────────────────
+    # ── prep_batch (FIXED) ────────────────────────────────────────────────────
 
     def prep_batch(self, batch, isValid=False, cuda=True):
         """
-        Prepares the batch for the downstream translation model.
+        FIX: list_of_flows is popped from model_input before convert_tensor
+        and reattached after. convert_tensor crashes on None values inside
+        dicts — this is the root cause of:
+            TypeError: x must contain torch.Tensor, dicts or lists; found NoneType
 
-        CHANGE vs original: extracts flow from batch and adds list_of_flows
-        to model_input. This is the ONLY change in this entire file.
-
-        The flow tensor (T, 2, 64, 64) per sample travels:
-            batch["flow"]                    (from dataloader)
-            -> list_of_flows                 (extracted here)
-            -> model_input["list_of_flows"]  (passed to model)
-            -> dino_adaptor_model.forward()  (FlowBranch + GatedFusion)
-
-        convert_tensor moves all tensors in res to GPU, including flow.
-        Ignite handles lists of tensors correctly in convert_tensor.
+        When flow is present (list of tensors): tensors are moved to GPU manually.
+        When flow is None (no flow_lmdb_dir set): passed through as None.
+        Either way, the model receives list_of_flows correctly.
         """
         idx, frames, sentence = (
             batch["index"],
@@ -410,14 +407,8 @@ class Trainer(BaseTrainer):
             batch["sentence"],
         )
         frame_features = frames
+        list_of_flows  = batch.get("flow", None)
 
-        # ── NEW: extract flow ─────────────────────────────────────────────────
-        # Same pattern as psuedo_gloss_trainer: .get() with None default means
-        # if flow_lmdb_dir is not set, this is None and the model skips flow.
-        list_of_flows = batch.get("flow", None)
-        # ── END NEW ───────────────────────────────────────────────────────────
-
-        # Frame mask for the decoder's cross-attention (unchanged)
         frame_mask = torch.zeros(
             len(frame_features), max([len(feat) for feat in frame_features])
         )
@@ -425,7 +416,6 @@ class Trainer(BaseTrainer):
             frame_mask[i, : len(fr)] = 1.0
         frame_mask = frame_mask.bool()
 
-        # Tokenise target sentences (unchanged)
         dict_text = self.tokenizer(
             [
                 (self.pretext + sent + self.tokenizer.eos_token)
@@ -455,33 +445,37 @@ class Trainer(BaseTrainer):
                 "max_len": torch.tensor(
                     self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
                 ),
-                # ── NEW: flow for downstream translation ──────────────────────
-                # Exactly the same as pretraining trainer.
-                # The downstream model passes this through to dino_adaptor_model.
-                "list_of_flows": list_of_flows,
-                # ── END NEW ───────────────────────────────────────────────────
+                # list_of_flows is intentionally NOT included here —
+                # it is added back after convert_tensor below
             },
             "targets": {
-                "gloss_ids": batch["gloss_ids"] if "gloss_ids" in batch else [],
+                "gloss_ids":       batch["gloss_ids"] if "gloss_ids" in batch else [],
                 "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
                 if "pseudo_gloss_ids" in batch
                 else [],
-                "index":         torch.stack(idx),
-                "sentence":      sentence,
-                "gt_ids":        gt_ids,
-                "gt_text_mask":  gt_text_mask,
+                "index":        torch.stack(idx),
+                "sentence":     sentence,
+                "gt_ids":       gt_ids,
+                "gt_text_mask": gt_text_mask,
             },
         }
-        # if list_of_flows is not None:
-        #     res["model_input"]["list_of_flows"] = list_of_flows
 
-        return (
-            convert_tensor(res, device=idist.device(), non_blocking=True)
-            if cuda
-            else res
-        )
+        if cuda:
+            # Move all tensors to GPU — list_of_flows excluded (handled below)
+            res = convert_tensor(res, device=idist.device(), non_blocking=True)
 
-    # ── Training steps (ALL UNCHANGED — they just call prep_batch) ───────────
+            # Move flow tensors to GPU manually if present
+            # convert_tensor cannot handle None or lists of variable-length tensors
+            if list_of_flows is not None:
+                device = idist.device()
+                list_of_flows = [f.to(device, non_blocking=True) for f in list_of_flows]
+
+        # Reattach flow to model_input after convert_tensor
+        res["model_input"]["list_of_flows"] = list_of_flows
+
+        return res
+
+    # ── Training steps (unchanged) ────────────────────────────────────────────
 
     def train_step(self, engine, batch):
         engine.state.batch  = None
@@ -572,7 +566,6 @@ class Trainer(BaseTrainer):
                     "frame_features": x["model_input"]["frame_features"],
                     "frame_mask":     x["model_input"]["frame_mask"],
                     "max_len":        x["model_input"]["max_len"],
-                    # NEW — flow also passed to generation forward call
                     "list_of_flows":  x["model_input"]["list_of_flows"],
                 }
 
