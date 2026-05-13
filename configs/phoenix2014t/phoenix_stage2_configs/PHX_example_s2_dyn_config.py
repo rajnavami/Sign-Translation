@@ -198,8 +198,9 @@ def get_config():
 
     # IMPORTANT — run mode:
     # cfg.run = False  → TRAINING mode   ← use this to train Stage 2
-    # cfg.run = True   → EVALUATION mode ← set this after training to get BLEU4
-    cfg.run            = False
+    cfg.run = True   
+    # → EVALUATION mode ← set this after training to get BLEU4
+    # cfg.run            = False
     cfg.load_from_ckpt = "best"
 
     cfg.seed            = 1
