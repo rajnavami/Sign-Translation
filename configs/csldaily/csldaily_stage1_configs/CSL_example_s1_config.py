@@ -18,7 +18,7 @@ def get_config():
     cfg.save_dir = f"{ckpt_path}/{base_name}/{cfg.name}"
 
     cfg.main_runner = "trainer.psuedo_gloss_trainer"
-    cfg.project_name = "final_csl_pretrain"
+    cfg.project_name = "final_phoenix2014t_pretrain"
     cfg.aug_name = "augmentation.video.base_video_aug"
 
     cfg.aug_params = {
@@ -84,15 +84,17 @@ def get_config():
     cfg.max_epochs = 100
     cfg.model_checkpoint_dir = ""
 
-    cfg.train_ds_name = "dataloaders.csldaily_video_dataset"
-    cfg.valid_ds_name = "dataloaders.csldaily_video_dataset"
-    cfg.test_ds_name = "dataloaders.csldaily_video_dataset"
+    cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
+    cfg.valid_ds_name = "dataloaders.phoenix_video_dataset"
+    cfg.test_ds_name = "dataloaders.phoenix_video_dataset"
     train_ds_params = {
-        "split": "train",
-        "pseudo_gloss_dir": f"{code_path}/data/csldaily/processed_words.csl_pkl",
-        "tsv_dir": f"{code_path}/data/csldaily/data.tsv",
+        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.train.corpus.csv",
+        "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
+        "sep": "|",
+        "name": "translation",
         "ds_params": {
-            "lmdb_video_dir": f"{lmdb_path}/combined_dataset/csl-daily/lmdb_videos",
+            "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
             "isValid": False,
         },
         "shuffle": True,
@@ -103,11 +105,13 @@ def get_config():
     cfg.train_ds_params = config_dict.ConfigDict(train_ds_params)
 
     valid_ds_params = {
-        "split": "dev",
-        "pseudo_gloss_dir": f"{code_path}/data/csldaily/processed_words.csl_pkl",
-        "tsv_dir": f"{code_path}/data/csldaily/data.tsv",
+        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.dev.corpus.csv",
+        "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
+        "sep": "|",
+        "name": "translation",
         "ds_params": {
-            "lmdb_video_dir": f"{lmdb_path}/combined_dataset/csl-daily/lmdb_videos",
+            "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
             "isValid": True,
         },
         "shuffle": False,
@@ -118,11 +122,13 @@ def get_config():
     cfg.valid_ds_params = config_dict.ConfigDict(valid_ds_params)
 
     test_ds_params = {
-        "split": "test",
-        "pseudo_gloss_dir": f"{code_path}/data/csldaily/processed_words.csl_pkl",
-        "tsv_dir": f"{code_path}/data/csldaily/data.tsv",
+        "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.test.corpus.csv",
+        "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
+        "sep": "|",
+        "name": "translation",
         "ds_params": {
-            "lmdb_video_dir": f"{lmdb_path}/combined_dataset/csl-daily/lmdb_videos",
+            "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
             "isValid": True,
         },
         "shuffle": False,

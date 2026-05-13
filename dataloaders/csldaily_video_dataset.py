@@ -19,10 +19,12 @@ class CSLDailyDataset(Dataset):
         dict_sentence=None,
         dict_lem_to_id=None,
         dict_lem_counter=None,
+        flow_lmdb_dir=None,
     ):
         self.id = id
         self.items = [item]
         self.lmdb_video_dir = lmdb_video_dir
+        self.flow_lmdb_dir = flow_lmdb_dir
         self.transform = transform
         self.isValid = isValid
         self.dict_sentence = dict_sentence
@@ -30,6 +32,7 @@ class CSLDailyDataset(Dataset):
         self.dict_lem_counter = dict_lem_counter
 
         self.lmdb_util_video = None
+        self.lmdb_util_flow = None
 
     def __len__(self):
         return len(self.items)
@@ -46,6 +49,11 @@ class CSLDailyDataset(Dataset):
                 f"{self.lmdb_video_dir}/{self.id}",
             )
             self.num_frames = self.lmdb_util_video.details["num_frames"]
+
+        if self.flow_lmdb_dir and not self.lmdb_util_flow:
+            self.lmdb_util_flow = LMDBUtility(
+                f"{self.flow_lmdb_dir}/{self.id}",
+            )
 
         item = self.items[idx]
         file_name = item["name"]
@@ -66,6 +74,11 @@ class CSLDailyDataset(Dataset):
 
         frames = self.lmdb_util_video.get_frames(selection_frames)
 
+        flow_data = None
+        if self.flow_lmdb_dir:
+            flow_frames = self.lmdb_util_flow.get_frames(selection_frames)
+            flow_data = torch.tensor(np.stack(flow_frames)).float()  # [T, H, W, 2]
+
         if self.transform:
             frames = self.transform.aug_video(frames, self.isValid)
         else:
@@ -80,7 +93,7 @@ class CSLDailyDataset(Dataset):
                     for lem in lems
                     if self.dict_lem_counter[lem] / len(self.dict_sentence) < 0.4
                 ]
-        return {
+        result = {
             "index": torch.tensor(idx).long(),
             "frames": frames,
             "sentence": sentence,
@@ -91,6 +104,9 @@ class CSLDailyDataset(Dataset):
                 else {}
             ),
         }
+        if flow_data is not None:
+            result["flow_data"] = flow_data
+        return result
 
 
 def get_ds(ds_params, transform):
@@ -122,13 +138,15 @@ def get_ds(ds_params, transform):
     counter = 0
     for index, row in tqdm(df.iterrows()):
         ds = CSLDailyDataset(
-            **params,
-            item=row.to_dict(),
             id=row["name"],
+            item=row.to_dict(),
+            lmdb_video_dir=params["lmdb_video_dir"],
+            flow_lmdb_dir=params.get("flow_lmdb_dir"),
+            transform=transform,
+            isValid=split in ["val", "test"],
             dict_sentence=dict_sentence,
             dict_lem_to_id=dict_lem_to_id,
             dict_lem_counter=dict_lem_counter,
-            transform=transform,
         )
         collate_fn = ds.collate_fn
         list_of_ds.append(ds)

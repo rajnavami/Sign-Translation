@@ -21,6 +21,14 @@ def get_sign_encoder():
                 "lora_a": 4.0,
                 "rng_init": False,
             },
+            # ── Optical flow ──────────────────────────────────────────────────
+            # use_flow=True  : enables FlowBranch + GatedFusion
+            #                  requires flow_lmdb_dir set in dataset config
+            # use_flow=False : pure RGB baseline, no extra params
+            "use_flow":    True,
+            "flow_params": {},
+            # NOTE: flow_ckpt_dir has been REMOVED — it no longer exists in
+            # dino_adaptor_model.py. Flow is precomputed, no model needed.
         },
         "encoder_name": "models.metaformer.meta_model",
         "encoder_params": {

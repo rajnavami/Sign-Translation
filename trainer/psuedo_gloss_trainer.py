@@ -51,6 +51,55 @@ class Trainer(BaseTrainer):
         valid_tester = Engine(self.test_step)
         test_tester = Engine(self.test_step)
 
+    def init_optimizer(self, cfg):
+        """
+        Updated for DINOv2 + LoRA + optical flow integration.
+
+        Key changes:
+        - Separate 5x higher LR for flow_branch + fusion params
+        - Flow branch (randomly initialized) gets higher LR to learn faster
+        - DINOv2 backbone + LoRA are pretrained — need small LR to avoid destabilizing
+        """
+        from optimizer.get_optimizer import get_optim
+
+        # Get base optimizer
+        self.optimizer = get_optim(cfg.optimizer_name, cfg.optimizer_params, self.model)
+
+        # Separate LR for flow components
+        flow_params = []
+        other_params = []
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                if 'flow_branch' in name or 'fusion' in name:
+                    flow_params.append(param)
+                else:
+                    other_params.append(param)
+
+        # Flow gets 5x higher LR
+        flow_lr = cfg.lr * 5
+        base_lr = cfg.lr
+
+        self.optimizer = torch.optim.AdamW([
+            {'params': other_params, 'lr': base_lr},
+            {'params': flow_params, 'lr': flow_lr}
+        ], weight_decay=cfg.optimizer_params['weight_decay'])
+
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        print("MODEL:", count_parameters(self.model))
+        print(f"Flow params: {len(flow_params)}, Other params: {len(other_params)}")
+        print(f"Flow LR: {flow_lr}, Base LR: {base_lr}")
+
+        if not self.support_bfloat:
+            self.scaler = torch.cuda.amp.GradScaler()
+        else:
+            self.scaler = None
+        self.grad_clip_norm = cfg.grad_clip_norm if ("grad_clip_norm" in cfg) else None
+        self.grad_clip_value = (
+            cfg.grad_clip_value if ("grad_clip_value" in cfg) else None
+        )
+
         self.scheduler = self.prep_scheduler(
             cfg, train_dl, self.optimizer, trainer, evaluator
         )
@@ -261,13 +310,19 @@ class Trainer(BaseTrainer):
 
         frame_features = frames
 
+        model_input = {
+            "list_of_frames": frame_features,
+            "max_len": torch.tensor(
+                self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
+            ),
+        }
+
+        # Add flow data if available
+        if "flow_data" in batch:
+            model_input["flow_data"] = batch["flow_data"]
+
         res = {
-            "model_input": {
-                "frame_features": frame_features,
-                "max_len": torch.tensor(
-                    self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
-                ),
-            },
+            "model_input": model_input,
             "targets": {
                 "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
                 if "pseudo_gloss_ids" in batch
@@ -291,7 +346,11 @@ class Trainer(BaseTrainer):
         with torch.autocast(device_type="cuda", dtype=self.dtype):
             self.optimizer.zero_grad()
 
-            y_pred = self.model(**x["model_input"])
+            y_pred = self.model(
+                list_of_frames=x["model_input"]["list_of_frames"],
+                flow_data=x["model_input"].get("flow_data"),
+                max_len=x["model_input"]["max_len"]
+            )
 
         loss, dict_losses = self.loss_fn(y_pred, x["targets"])
 
@@ -345,7 +404,11 @@ class Trainer(BaseTrainer):
         with torch.inference_mode(True):
             x = self.prep_batch(batch, isValid=True)
             with torch.autocast(device_type="cuda", dtype=self.dtype):
-                y_pred = self.model(**x["model_input"])
+                y_pred = self.model(
+                    list_of_frames=x["model_input"]["list_of_frames"],
+                    flow_data=x["model_input"].get("flow_data"),
+                    max_len=x["model_input"]["max_len"]
+                )
 
             loss, dict_losses = self.loss_fn(y_pred, x["targets"])
 
@@ -365,7 +428,11 @@ class Trainer(BaseTrainer):
         with torch.inference_mode(True):
             x = self.prep_batch(batch, isValid=True)
             with torch.autocast(device_type="cuda", dtype=self.dtype):
-                y_pred = self.model(**x["model_input"])
+                y_pred = self.model(
+                    list_of_frames=x["model_input"]["list_of_frames"],
+                    flow_data=x["model_input"].get("flow_data"),
+                    max_len=x["model_input"]["max_len"]
+                )
 
             loss, dict_losses = self.loss_fn(y_pred, x["targets"])
 

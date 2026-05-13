@@ -23,12 +23,15 @@ class PhoenixVideoDataset(Dataset):
         dict_sentence=None,
         dict_lem_to_id=None,
         dict_lem_counter=None,
+        flow_lmdb_dir=None,
     ):
         self.items = df.to_dict("records")
         self.lmdb_dir = lmdb_video_dir
+        self.flow_lmdb_dir = flow_lmdb_dir
         self.transform = transform
         self.isValid = isValid
         self.lmdb_util_video = None
+        self.lmdb_util_flow = None
         self.dict_gloss_to_id = dict_gloss_to_id
         self.dict_sentence = dict_sentence
         self.dict_lem_to_id = dict_lem_to_id
@@ -53,6 +56,11 @@ class PhoenixVideoDataset(Dataset):
 
             self.num_frames = self.lmdb_util_video.details["num_frames"]
 
+        if self.flow_lmdb_dir and not self.lmdb_util_flow:
+            self.lmdb_util_flow = LMDBUtility(
+                f"{self.flow_lmdb_dir}/{file_name}",
+            )
+
         if self.isValid:
             start_frame = 0
             end_frame = self.num_frames
@@ -75,6 +83,11 @@ class PhoenixVideoDataset(Dataset):
 
         frames = self.lmdb_util_video.get_frames(selection)
 
+        flow_data = None
+        if self.flow_lmdb_dir:
+            flow_frames = self.lmdb_util_flow.get_frames(selection)
+            flow_data = torch.tensor(np.stack(flow_frames)).float()  # [T, H, W, 2]
+
         if self.transform:
             frames = self.transform.aug_video(frames, self.isValid)
         else:
@@ -95,7 +108,7 @@ class PhoenixVideoDataset(Dataset):
         if self.dict_gloss_to_id:
             gloss_ids = [self.dict_gloss_to_id[gloss] for gloss in glosses]
 
-        return {
+        result = {
             "index": torch.tensor(idx).long(),
             "frames": frames,
             "sentence": sentence,
@@ -111,6 +124,9 @@ class PhoenixVideoDataset(Dataset):
                 else {}
             ),
         }
+        if flow_data is not None:
+            result["flow_data"] = flow_data
+        return result
 
 
 def get_ds(ds_params, transform):
@@ -137,12 +153,14 @@ def get_ds(ds_params, transform):
     for gp, d in tqdm(df.groupby("name")):
         ds = PhoenixVideoDataset(
             d,
-            **ds_params["ds_params"],
+            lmdb_video_dir=ds_params["ds_params"]["lmdb_video_dir"],
+            flow_lmdb_dir=ds_params["ds_params"].get("flow_lmdb_dir"),
             dict_gloss_to_id=dict_gloss_to_id,
             dict_sentence=dict_sentence,
             dict_lem_to_id=dict_lem_to_id,
             dict_lem_counter=dict_lem_counter,
             transform=transform,
+            isValid=ds_params["ds_params"]["isValid"],
         )
         list_of_ds.append(ds)
         collate_fn = ds.collate_fn
