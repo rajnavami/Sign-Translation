@@ -1,7 +1,13 @@
 import argparse
 import os
+import sys
 import lmdb
-import cv2
+try:
+    import cv2
+except ImportError as e:
+    raise ImportError(
+        "OpenCV is required for optical flow processing. Install it with `pip install opencv-python` or `pip install opencv-python-headless`."
+    ) from e
 import numpy as np
 import pickle
 import io
@@ -9,6 +15,10 @@ from PIL import Image
 from pathlib import Path
 from multiprocessing import Pool
 from tqdm import tqdm
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from dataloaders.data_utils.lmdb_utils import LMDBUtility
 
