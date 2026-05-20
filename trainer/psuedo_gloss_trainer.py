@@ -62,9 +62,6 @@ class Trainer(BaseTrainer):
         """
         from optimizer.get_optimizer import get_optim
 
-        # Get base optimizer
-        self.optimizer = get_optim(cfg.optimizer_name, cfg.optimizer_params, self.model)
-
         # Separate LR for flow components
         flow_params = []
         other_params = []
@@ -112,7 +109,7 @@ class Trainer(BaseTrainer):
                 "class_accuracy",
                 "f1_score",
                 "class_f1_score",
-            ],  
+            ],
             additional=True,
             max_length=self.max_length,
             num_samples=train_dict["length"],
@@ -126,7 +123,7 @@ class Trainer(BaseTrainer):
                 "class_accuracy",
                 "f1_score",
                 "class_f1_score",
-            ], 
+            ],
             additional=True,
             max_length=self.max_length,
             num_samples=valid_dict["length"],
@@ -155,7 +152,7 @@ class Trainer(BaseTrainer):
                 "class_accuracy",
                 "f1_score",
                 "class_f1_score",
-            ], 
+            ],
             additional=False,
             max_length=self.max_length,
             num_samples=test_dict["length"],
@@ -245,18 +242,15 @@ class Trainer(BaseTrainer):
         def output_fn(a):
             x = a["y_pred"]["dict_post_output"]["logits"]
             tgt = a["target"]["targets"]["pseudo_gloss_ids"]
-
             return (x, tgt)
 
         if "accuracy" in list_of_metrics:
             from metrics.accuracy_score import AccuracyScore
-
             dict_metrics[f"{engine_type}/avg_acc"] = AccuracyScore(
                 output_transform=output_fn, thresholds=0.5
             )
         if "class_accuracy" in list_of_metrics:
             from metrics.class_accuracy_score import ClassAccuracyScore
-
             dict_metrics[f"{engine_type}/cls_acc"] = ClassAccuracyScore(
                 output_transform=output_fn,
                 thresholds=0.5,
@@ -264,27 +258,22 @@ class Trainer(BaseTrainer):
             )
         if "f1_score" in list_of_metrics:
             from metrics.f1_score import F1Score
-
             dict_metrics[f"{engine_type}/f1_score"] = F1Score(
                 output_transform=output_fn, thresholds=0.5
             )
-
         if "class_f1_score" in list_of_metrics:
             from metrics.class_f1_score import ClassF1Score
-
             dict_metrics[f"{engine_type}/class_f1_score"] = ClassF1Score(
                 output_transform=output_fn,
                 thresholds=0.5,
                 num_classes=kwargs["num_classes"],
             )
-
         return dict_metrics
 
     def init_metrics(
         self, engine, engine_type, list_of_metrics, additional=True, **kwargs
     ):
         dict_metrics = {}
-
         dict_metrics = self.dict_metric_from_list(
             engine_type, list_of_metrics, dict_metrics, **kwargs
         )
@@ -292,17 +281,22 @@ class Trainer(BaseTrainer):
             engine, engine_type, dict_metrics=dict_metrics, additional=additional
         )
 
-    def init_models(
-        self,
-    ):
+    def init_models(self):
         dict_model_params = self.cfg.model_params.to_dict()
-
         self.model = get_model(self.cfg.model_name, dict_model_params)
         self.model = idist.auto_model(
             self.model, find_unused_parameters=False, sync_bn=True
         )
 
     def prep_batch(self, batch, isValid=False, cuda=True):
+        """
+        FIX: flow_data is popped from model_input before convert_tensor
+        and reattached after. convert_tensor crashes on None values inside
+        dicts — same issue as Sign2GPT project.
+
+        When flow is present (tensor): moved to GPU manually.
+        When flow is None (no flow_lmdb_dir): passed through as None.
+        """
         idx, frames = (
             batch["index"],
             batch["frames"],
@@ -310,19 +304,17 @@ class Trainer(BaseTrainer):
 
         frame_features = frames
 
-        model_input = {
-            "list_of_frames": frame_features,
-            "max_len": torch.tensor(
-                self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
-            ),
-        }
-
-        # Add flow data if available
-        if "flow_data" in batch:
-            model_input["flow_data"] = batch["flow_data"]
+        # Extract flow BEFORE building res dict — kept separate from convert_tensor
+        flow_data = batch.get("flow_data", None)
 
         res = {
-            "model_input": model_input,
+            "model_input": {
+                "list_of_frames": frame_features,
+                "max_len": torch.tensor(
+                    self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
+                ),
+                # flow_data intentionally excluded — added back after convert_tensor
+            },
             "targets": {
                 "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
                 if "pseudo_gloss_ids" in batch
@@ -331,11 +323,20 @@ class Trainer(BaseTrainer):
             },
         }
 
-        return (
-            convert_tensor(res, device=idist.device(), non_blocking=True)
-            if cuda
-            else res
-        )
+        if cuda:
+            res = convert_tensor(res, device=idist.device(), non_blocking=True)
+            # Move flow to GPU manually if present
+            if flow_data is not None:
+                device = idist.device()
+                if isinstance(flow_data, list):
+                    flow_data = [f.to(device, non_blocking=True) for f in flow_data]
+                else:
+                    flow_data = flow_data.to(device, non_blocking=True)
+
+        # Reattach flow after convert_tensor
+        res["model_input"]["flow_data"] = flow_data
+
+        return res
 
     def train_step(self, engine, batch):
         engine.state.batch = None
@@ -345,7 +346,6 @@ class Trainer(BaseTrainer):
 
         with torch.autocast(device_type="cuda", dtype=self.dtype):
             self.optimizer.zero_grad()
-
             y_pred = self.model(
                 list_of_frames=x["model_input"]["list_of_frames"],
                 flow_data=x["model_input"].get("flow_data"),
@@ -356,10 +356,8 @@ class Trainer(BaseTrainer):
 
         if self.scaler is not None:
             self.scaler.scale(loss).backward()
-
             if self.grad_clip_value is not None or self.grad_clip_norm is not None:
                 self.scaler.unscale_(self.optimizer)
-
                 if self.grad_clip_value is not None:
                     torch.nn.utils.clip_grad_value_(
                         self.model.parameters(), self.grad_clip_value
@@ -381,9 +379,7 @@ class Trainer(BaseTrainer):
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.grad_clip_norm
                 )
-            # ------------------------------------------------------------------------
             self.manually_update_gradients()
-            # ------------------------------------------------------------------------
             self.optimizer.step()
         return {
             "y_pred": y_pred,
@@ -409,9 +405,7 @@ class Trainer(BaseTrainer):
                     flow_data=x["model_input"].get("flow_data"),
                     max_len=x["model_input"]["max_len"]
                 )
-
             loss, dict_losses = self.loss_fn(y_pred, x["targets"])
-
             return {
                 "y_pred": y_pred,
                 "target": x,
@@ -433,9 +427,7 @@ class Trainer(BaseTrainer):
                     flow_data=x["model_input"].get("flow_data"),
                     max_len=x["model_input"]["max_len"]
                 )
-
             loss, dict_losses = self.loss_fn(y_pred, x["targets"])
-
             return {
                 "y_pred": y_pred,
                 "target": x,

@@ -67,44 +67,27 @@ class Trainer(BaseTrainer):
         )
 
         self.init_metrics(
-            trainer,
-            "train",
-            ["obleu", "orouge"], 
+            trainer, "train", ["obleu", "orouge"],
             additional=True,
             max_length=self.max_length,
             num_samples=train_dict["length"],
         )
         self.init_metrics(
-            evaluator,
-            "valid",
-            ["obleu", "orouge"], 
+            evaluator, "valid", ["obleu", "orouge"],
             additional=True,
             max_length=self.max_length,
             num_samples=valid_dict["length"],
         )
-
         self.init_metrics(
-            valid_tester,
-            "valid_test",
-            [
-                "ableu",
-                "obleu",
-                "orouge",
-                "arouge",
-            ],  
+            valid_tester, "valid_test",
+            ["ableu", "obleu", "orouge", "arouge"],
             additional=False,
             max_length=self.max_length,
             num_samples=valid_dict["length"],
         )
         self.init_metrics(
-            test_tester,
-            "test_test",
-            [
-                "ableu",
-                "obleu",
-                "orouge",
-                "arouge",
-            ], 
+            test_tester, "test_test",
+            ["ableu", "obleu", "orouge", "arouge"],
             additional=False,
             max_length=self.max_length,
             num_samples=test_dict["length"],
@@ -162,16 +145,12 @@ class Trainer(BaseTrainer):
             self.evaluator = evaluator
             self.valid_tester = valid_tester
             self.test_tester = test_tester
-            test_tester.run(
-                test_dl, max_epochs=1, epoch_length=None
-            )
+            test_tester.run(test_dl, max_epochs=1, epoch_length=None)
             metrics = test_tester.state.metrics
             print("metrics", metrics)
-
             if "test_test/ableu" in metrics:
                 for k, v in metrics["test_test/ableu"].items():
                     print(f"{k}: {v}")
-        
             if "test_test/obleu" in metrics:
                 for k, v in metrics["test_test/obleu"].items():
                     print(f"{k}: {v}")
@@ -179,9 +158,7 @@ class Trainer(BaseTrainer):
             self.prepare_runner(
                 cfg, trainer, evaluator, valid_dl, valid_tester, test_tester, test_dl
             )
-
             self.cleaning_with_progress(trainer, evaluator, cfg, train_dl)
-
             trainer.run(
                 train_dl, max_epochs=cfg.max_epochs, epoch_length=cfg.train_length
             )
@@ -196,12 +173,9 @@ class Trainer(BaseTrainer):
 
         self.logger.on_train_epoch_end(trainer, self.optimizer)
         self.logger.on_train_iteration(trainer, self.model, self.scaler)
-
         trainer.add_event_handler(Events.EPOCH_COMPLETED(every=1), run_evaluator)
         self.logger.on_valid_epoch_end(trainer, evaluator)
-
         self.logger.on_completion(trainer)
-
 
         if cfg.save_ckpt:
             def run_tester_valid(engine):
@@ -216,18 +190,13 @@ class Trainer(BaseTrainer):
 
             if "pbar" in self.cfg.logger_name:
                 from ignite.contrib.handlers import ProgressBar
-
                 if idist.get_rank() == 0:
                     pbar = ProgressBar()
                     pbar.attach(valid_tester)
 
-    def dict_metric_from_list(
-        self, engine_type, list_of_metrics, dict_metrics, **kwargs
-    ):
-
+    def dict_metric_from_list(self, engine_type, list_of_metrics, dict_metrics, **kwargs):
         if "obleu" in list_of_metrics:
             from metrics.bleu_score import BLEUScore
-
             def text_transform(x):
                 p_words = []
                 pred_logits = x["y_pred"]["logits"]
@@ -240,33 +209,20 @@ class Trainer(BaseTrainer):
                     indices_eos = torch.where(pred == self.tokenizer.eos_token_id)[0]
                     if len(indices_eos) > 0:
                         pred = pred[: indices_eos[0]]
-                    p = self.tokenizer.decode(
-                        pred,
-                        skip_special_tokens=True,
-                    )
+                    p = self.tokenizer.decode(pred, skip_special_tokens=True)
                     for k, v in self.new_to_original_dict.items():
                         p = p.replace(k, v)
-
-                    p_words.append(
-                        " ".join(list(p)) if self.cfg.apply_metric_splitter else p
-                    )
+                    p_words.append(" ".join(list(p)) if self.cfg.apply_metric_splitter else p)
                 if self.cfg.apply_metric_splitter:
                     t = [" ".join(list(x)) for x in tgt["sentence"]]
                 else:
                     t = [x + self.cfg.append_string for x in tgt["sentence"]]
                 p_words = [x + self.cfg.append_string for x in p_words]
-                # for ind, (pw, tw) in enumerate(zip(p_words, t)):
-                #     print(f"{ind} OBLEU:", pw)
-                #     print(f"{ind}   TGT:", tw)
-                #     print("----------------------------------")
-                return p_words, t  # tgt["sentence"]
+                return p_words, t
+            dict_metrics[f"{engine_type}/obleu"] = BLEUScore(output_transform=text_transform)
 
-            dict_metrics[f"{engine_type}/obleu"] = BLEUScore(
-                output_transform=text_transform
-            )
         if "orouge" in list_of_metrics:
             from metrics.rouge_score import RougeMetric
-
             def text_transform(x):
                 p_words = []
                 pred_logits = x["y_pred"]["logits"]
@@ -279,30 +235,20 @@ class Trainer(BaseTrainer):
                     indices_eos = torch.where(pred == self.tokenizer.eos_token_id)[0]
                     if len(indices_eos) > 0:
                         pred = pred[: indices_eos[0]]
-                    p = self.tokenizer.decode(
-                        pred,
-                        skip_special_tokens=True,
-                    )
+                    p = self.tokenizer.decode(pred, skip_special_tokens=True)
                     for k, v in self.new_to_original_dict.items():
                         p = p.replace(k, v)
-
-                    p_words.append(
-                        " ".join(list(p)) if self.cfg.apply_metric_splitter else p
-                    )
+                    p_words.append(" ".join(list(p)) if self.cfg.apply_metric_splitter else p)
                 if self.cfg.apply_metric_splitter:
                     t = [" ".join(list(x)) for x in tgt["sentence"]]
                 else:
                     t = [x + self.cfg.append_string for x in tgt["sentence"]]
                 p_words = [x + self.cfg.append_string for x in p_words]
+                return p_words, t
+            dict_metrics[f"{engine_type}/orouge"] = RougeMetric(output_transform=text_transform)
 
-                return p_words, t  # tgt["sentence"]
-
-            dict_metrics[f"{engine_type}/orouge"] = RougeMetric(
-                output_transform=text_transform
-            )
         if "ableu" in list_of_metrics:
             from metrics.bleu_score import BLEUScore
-
             def autoreg_text_transform(a):
                 x = a["y_pred"]["generated"]
                 tgt = a["target"]["targets"]
@@ -311,15 +257,10 @@ class Trainer(BaseTrainer):
                     indices_eos = torch.where(pred == self.tokenizer.eos_token_id)[0]
                     if len(indices_eos) > 0:
                         pred = pred[: indices_eos[0]]
-                    p = self.tokenizer.decode(
-                        pred,
-                        skip_special_tokens=True,
-                    )
+                    p = self.tokenizer.decode(pred, skip_special_tokens=True)
                     for k, v in self.new_to_original_dict.items():
                         p = p.replace(k, v)
-                    p_words.append(
-                        " ".join(list(p)) if self.cfg.apply_metric_splitter else p
-                    )
+                    p_words.append(" ".join(list(p)) if self.cfg.apply_metric_splitter else p)
                 if self.cfg.apply_metric_splitter:
                     t = [" ".join(list(x)) for x in tgt["sentence"]]
                 else:
@@ -329,15 +270,11 @@ class Trainer(BaseTrainer):
                     print(f"{ind} ABLEU:", pw)
                     print(f"{ind}   TGT:", tw)
                     print("----------------------------------")
+                return (p_words, t)
+            dict_metrics[f"{engine_type}/ableu"] = BLEUScore(output_transform=autoreg_text_transform)
 
-                return (p_words, t)  # tgt["sentence"])
-
-            dict_metrics[f"{engine_type}/ableu"] = BLEUScore(
-                output_transform=autoreg_text_transform
-            )
         if "arouge" in list_of_metrics:
-            from metrics.bleu_score import BLEUScore
-
+            from metrics.rouge_score import RougeMetric
             def autoreg_text_transform2(a):
                 x = a["y_pred"]["generated"]
                 tgt = a["target"]["targets"]
@@ -346,44 +283,26 @@ class Trainer(BaseTrainer):
                     indices_eos = torch.where(pred == self.tokenizer.eos_token_id)[0]
                     if len(indices_eos) > 0:
                         pred = pred[: indices_eos[0]]
-                    p = self.tokenizer.decode(
-                        pred,
-                        skip_special_tokens=True,
-                    )
+                    p = self.tokenizer.decode(pred, skip_special_tokens=True)
                     for k, v in self.new_to_original_dict.items():
                         p = p.replace(k, v)
-
-                    p_words.append(
-                        " ".join(list(p)) if self.cfg.apply_metric_splitter else p
-                    )
+                    p_words.append(" ".join(list(p)) if self.cfg.apply_metric_splitter else p)
                 if self.cfg.apply_metric_splitter:
                     t = [" ".join(list(x)) for x in tgt["sentence"]]
                 else:
                     t = [x + self.cfg.append_string for x in tgt["sentence"]]
                 p_words = [x + self.cfg.append_string for x in p_words]
+                return (p_words, t)
+            dict_metrics[f"{engine_type}/arouge"] = RougeMetric(output_transform=autoreg_text_transform2)
 
-                return (p_words, t)  # tgt["sentence"])
-
-            dict_metrics[f"{engine_type}/arouge"] = RougeMetric(
-                output_transform=autoreg_text_transform2
-            )
         return dict_metrics
 
-    def init_metrics(
-        self, engine, engine_type, list_of_metrics, additional=True, **kwargs
-    ):
+    def init_metrics(self, engine, engine_type, list_of_metrics, additional=True, **kwargs):
         dict_metrics = {}
+        dict_metrics = self.dict_metric_from_list(engine_type, list_of_metrics, dict_metrics, **kwargs)
+        super().init_metrics(engine, engine_type, dict_metrics=dict_metrics, additional=additional)
 
-        dict_metrics = self.dict_metric_from_list(
-            engine_type, list_of_metrics, dict_metrics, **kwargs
-        )
-        super().init_metrics(
-            engine, engine_type, dict_metrics=dict_metrics, additional=additional
-        )
-
-    def init_models(
-        self,
-    ):
+    def init_models(self):
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.cfg.lm_name, **self.cfg.additional_tokens
         )
@@ -391,7 +310,6 @@ class Trainer(BaseTrainer):
             self.pretext = self.cfg.pretext
             self.pretext_tokens = self.tokenizer(self.pretext)["input_ids"]
             self.pretext_length = len(self.pretext_tokens)
-
             if self.cfg.pretext[-1] == " ":
                 self.pretext_tokens = self.pretext_tokens[:-1]
                 self.pretext_length = self.pretext_length - 1
@@ -406,15 +324,10 @@ class Trainer(BaseTrainer):
         if "replacement_pickle" in self.cfg and self.cfg.replacement_pickle is not None:
             with open(self.cfg.replacement_pickle, "rb") as handle:
                 dict_replacements = pickle.load(handle)
-
             self.tokenizer.add_tokens(dict_replacements["new_tokens"])
-
             dict_model_params["new_token_length"] = len(self.tokenizer)
-
             self.original_to_new_dict = dict_replacements["original_to_new_dict"]
-            self.new_to_original_dict = {
-                v: k for k, v in self.original_to_new_dict.items()
-            }
+            self.new_to_original_dict = {v: k for k, v in self.original_to_new_dict.items()}
         else:
             self.new_to_original_dict = {}
 
@@ -423,15 +336,21 @@ class Trainer(BaseTrainer):
             self.model, find_unused_parameters=False, sync_bn=True
         )
 
-
     def prep_batch(self, batch, isValid=False, cuda=True):
+        """
+        FIX: flow_data excluded from convert_tensor (crashes on None),
+        moved to GPU manually, then reattached to model_input.
+        Also passes flow_data through to model for Stage 2 translation.
+        """
         idx, frames, sentence = (
             batch["index"],
             batch["frames"],
             batch["sentence"],
         )
-
         frame_features = frames
+
+        # Extract flow BEFORE building res — kept out of convert_tensor
+        flow_data = batch.get("flow_data", None)
 
         frame_mask = torch.zeros(
             len(frame_features), max([len(feat) for feat in frame_features])
@@ -443,7 +362,6 @@ class Trainer(BaseTrainer):
         dict_text = self.tokenizer(
             [
                 (self.pretext + sent + self.tokenizer.eos_token)
-                # (self.tokenizer.bos_token + sent + self.tokenizer.eos_token)
                 for sent in sentence
             ],
             return_tensors="pt",
@@ -457,10 +375,9 @@ class Trainer(BaseTrainer):
         )
 
         text_ids = dict_text["input_ids"][:, :-1]
-
         text_attention_mask = copy.deepcopy(dict_text["attention_mask"])
-        gt_ids = dict_text["input_ids"][:, self.pretext_length :]
-        gt_text_mask = text_attention_mask[:, self.pretext_length :].bool()
+        gt_ids = dict_text["input_ids"][:, self.pretext_length:]
+        gt_text_mask = text_attention_mask[:, self.pretext_length:].bool()
 
         res = {
             "model_input": {
@@ -471,12 +388,11 @@ class Trainer(BaseTrainer):
                 "max_len": torch.tensor(
                     self.cfg.max_seq_len if "max_seq_len" in self.cfg else 512
                 ),
+                # flow_data intentionally excluded — added back after convert_tensor
             },
             "targets": {
                 "gloss_ids": batch["gloss_ids"] if "gloss_ids" in batch else [],
-                "pseudo_gloss_ids": batch["pseudo_gloss_ids"]
-                if "pseudo_gloss_ids" in batch
-                else [],
+                "pseudo_gloss_ids": batch["pseudo_gloss_ids"] if "pseudo_gloss_ids" in batch else [],
                 "index": torch.stack(idx),
                 "sentence": sentence,
                 "gt_ids": gt_ids,
@@ -484,11 +400,20 @@ class Trainer(BaseTrainer):
             },
         }
 
-        return (
-            convert_tensor(res, device=idist.device(), non_blocking=True)
-            if cuda
-            else res
-        )
+        if cuda:
+            res = convert_tensor(res, device=idist.device(), non_blocking=True)
+            # Move flow to GPU manually if present
+            if flow_data is not None:
+                device = idist.device()
+                if isinstance(flow_data, list):
+                    flow_data = [f.to(device, non_blocking=True) for f in flow_data]
+                else:
+                    flow_data = flow_data.to(device, non_blocking=True)
+
+        # Reattach after convert_tensor
+        res["model_input"]["flow_data"] = flow_data
+
+        return res
 
     def train_step(self, engine, batch):
         engine.state.batch = None
@@ -496,7 +421,7 @@ class Trainer(BaseTrainer):
         self.model.train()
         x = self.prep_batch(batch, isValid=False)
 
-        with torch.autocast(device_type="cuda", dtype=self.dtype):  # torch.bfloat16):
+        with torch.autocast(device_type="cuda", dtype=self.dtype):
             self.optimizer.zero_grad()
             y_pred = self.model(**x["model_input"])
 
@@ -504,38 +429,24 @@ class Trainer(BaseTrainer):
 
         if self.scaler is not None:
             self.scaler.scale(loss).backward()
-            # ------------------------------------------------------------------------
             self.manually_update_gradients()
-            # ------------------------------------------------------------------------
             if self.grad_clip_value is not None or self.grad_clip_norm is not None:
                 self.scaler.unscale_(self.optimizer)
                 if self.grad_clip_value is not None:
-                    torch.nn.utils.clip_grad_value_(
-                        self.model.parameters(), self.grad_clip_value
-                    )
+                    torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip_value)
                 if self.grad_clip_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), self.grad_clip_norm
-                    )
-
-
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             loss.backward()
-            # ------------------------------------------------------------------------
             self.manually_update_gradients()
-            # ------------------------------------------------------------------------
             if self.grad_clip_value is not None:
-                torch.nn.utils.clip_grad_value_(
-                    self.model.parameters(), self.grad_clip_value
-                )
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip_value)
             if self.grad_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.grad_clip_norm
-                )
-
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
             self.optimizer.step()
+
         return {
             "y_pred": y_pred,
             "target": x,
@@ -556,9 +467,7 @@ class Trainer(BaseTrainer):
             x = self.prep_batch(batch, isValid=True)
             with torch.autocast(device_type="cuda", dtype=self.dtype):
                 y_pred = self.model(**x["model_input"])
-
             loss, dict_losses = self.loss_fn(y_pred, x["targets"])
-
             return {
                 "y_pred": y_pred,
                 "target": x,
@@ -578,15 +487,13 @@ class Trainer(BaseTrainer):
                 y_pred = self.model(**x["model_input"])
 
                 model_input = {
-                    "text_mask": x["model_input"]["text_mask"][
-                        :, 0 : self.pretext_length
-                    ],
-                    "text_ids": x["model_input"]["text_ids"][
-                        :, 0 : self.pretext_length
-                    ],
+                    "text_mask": x["model_input"]["text_mask"][:, 0: self.pretext_length],
+                    "text_ids": x["model_input"]["text_ids"][:, 0: self.pretext_length],
                     "frame_features": x["model_input"]["frame_features"],
                     "frame_mask": x["model_input"]["frame_mask"],
                     "max_len": x["model_input"]["max_len"],
+                    # NEW — flow passed through to generation step
+                    "flow_data": x["model_input"]["flow_data"],
                 }
 
                 generated = self.model(
@@ -600,8 +507,8 @@ class Trainer(BaseTrainer):
                     generate=True,
                 )
                 y_pred["generated"] = generated["output_ids"]
-            loss, dict_losses = self.loss_fn(y_pred, x["targets"])
 
+            loss, dict_losses = self.loss_fn(y_pred, x["targets"])
             return {
                 "y_pred": y_pred,
                 "target": x,

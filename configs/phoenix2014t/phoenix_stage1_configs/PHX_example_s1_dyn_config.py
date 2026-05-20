@@ -35,17 +35,12 @@ def get_config():
     }
 
     base_bs = 8
-    cfg.bs = int(
-        8
-        * torch.cuda.device_count()
-        # * ((torch.cuda.mem_get_info()[1] / 10**6) / 24000)
-    )
+    cfg.bs = int(8 * torch.cuda.device_count())
     cfg.accum = 1
     cfg.num_workers = min(min(cfg.bs, int(10 * torch.cuda.device_count())), 10)
 
     cfg.gate_grad_multiplier = 1.0
-
-    cfg.lr = 3e-4  # * (cfg.bs**0.5) / (base_bs**0.5)
+    cfg.lr = 3e-4
     cfg.lr_scheduler = "warmupwithcosine"
     cfg.lr_scheduler_params = config_dict.ConfigDict(
         {
@@ -59,24 +54,17 @@ def get_config():
 
     cfg.optimizer_name = "adamw"
     cfg.optimizer_params = config_dict.ConfigDict(
-        {
-            "lr": cfg.lr,
-            "weight_decay": 0.001,
-        }
+        {"lr": cfg.lr, "weight_decay": 0.001}
     )
 
     cfg.criterion_name = "losses.base_loss"
-
     cfg.criterion_params = config_dict.ConfigDict(
         {
             "dict_of_loss_params": {
                 "bce": {
                     "cls_name": "losses.loss_functions.bce_loss",
                     "loss_params": {
-                        "src_name": (
-                            "dict_post_output",
-                            "logits",
-                        ),
+                        "src_name": ("dict_post_output", "logits"),
                         "tgt_name": "pseudo_gloss_ids",
                     },
                     "weight": 10.0,
@@ -90,7 +78,9 @@ def get_config():
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
     cfg.valid_ds_name = "dataloaders.phoenix_video_dataset"
-    cfg.test_ds_name = "dataloaders.phoenix_video_dataset"
+    cfg.test_ds_name  = "dataloaders.phoenix_video_dataset"
+
+    # ── Train split ───────────────────────────────────────────────────────────
     train_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.train.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -98,8 +88,11 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": False,
+            # NEW — precomputed optical flow directory
+            # Run scripts/optical_flow_embed.py first to generate this
+            # Remove or set to None to disable flow (pure RGB baseline)
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": True,
         "num_workers": cfg.num_workers,
@@ -108,6 +101,7 @@ def get_config():
     }
     cfg.train_ds_params = config_dict.ConfigDict(train_ds_params)
 
+    # ── Validation split ──────────────────────────────────────────────────────
     valid_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.dev.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -115,8 +109,8 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": False,
         "num_workers": cfg.num_workers,
@@ -125,6 +119,7 @@ def get_config():
     }
     cfg.valid_ds_params = config_dict.ConfigDict(valid_ds_params)
 
+    # ── Test split ────────────────────────────────────────────────────────────
     test_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.test.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -132,8 +127,8 @@ def get_config():
         "name": "translation",
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
-            # "lmdb_video_dir": f"{code_path}/{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": False,
         "num_workers": cfg.num_workers,
@@ -149,7 +144,7 @@ def get_config():
     post_params = {
         "in_dim": dim_model,
         "hidden_dim": 300,
-        "num_classes": 2330,    #old value: 2306, udpated as .pkl file has 2330 classes # NOTE: if using the config in github release pkl then num classes is 2533, spacy seems to have changed something
+        "num_classes": 2330,
         "dropout": 0.2,
         "class_temperature": 0.1,
         "time_temperature": 0.1,
@@ -167,18 +162,18 @@ def get_config():
         "post_params": post_params,
     }
 
-    cfg.seed = 1
-    cfg.grad_clip_norm = 1.0
+    cfg.seed            = 1
+    cfg.grad_clip_norm  = 1.0
     cfg.grad_clip_value = 1.0
-    cfg.logger_name = ["text", "tensorboard"]
-    cfg.resume = True
-    cfg.train_length = None
-    cfg.val_length = None
-    cfg.log_every = 100
-    cfg.save_ckpt = True
-    cfg.score_factor = 1
-    cfg.score_name = "valid/class_f1_score"
-    cfg.bfloat16_only = False
-    cfg.mixup = False
+    cfg.logger_name     = ["text", "tensorboard"]
+    cfg.resume          = False   # Set True after first checkpoint saves
+    cfg.train_length    = None
+    cfg.val_length      = None
+    cfg.log_every       = 100
+    cfg.save_ckpt       = True
+    cfg.score_factor    = 1
+    cfg.score_name      = "valid/class_f1_score"
+    cfg.bfloat16_only   = False
+    cfg.mixup           = False
 
     return cfg

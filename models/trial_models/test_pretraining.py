@@ -23,8 +23,16 @@ class Model(nn.Module):
         self,
         frame_features,
         max_len,
+        flow_data=None,     # NEW — passed from trainer prep_batch
     ):
-        dict_sign_output = self.sign_model(frame_features, max_len=max_len)
+        # CHANGED: pass flow_data to sign_model (basic_sign_encoder)
+        # which passes it further to spatial_model (dino_adaptor_model)
+        # When None: identical behaviour to original (flow branch skipped)
+        dict_sign_output = self.sign_model(
+            frame_features,
+            max_len=max_len,
+            flow_data=flow_data,    # NEW
+        )
         post_features, post_mask = (
             dict_sign_output["enc_output"]["post_output"]["x"],
             dict_sign_output["enc_output"]["post_output"]["mask"],
@@ -38,4 +46,3 @@ class Model(nn.Module):
             "dict_post_output": dict_post_output,
             **dict_sign_output,
         }
-
