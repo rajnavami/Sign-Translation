@@ -31,7 +31,9 @@ class PhoenixVideoDataset(Dataset):
         self.transform = transform
         self.isValid = isValid
         self.lmdb_util_video = None
-        self.lmdb_util_flow = None
+        # NOTE: lmdb_util_flow removed — flow is NOT stored as images,
+        # it is stored as pickled numpy arrays. We open it directly with lmdb.
+        self.flow_env = None
         self.dict_gloss_to_id = dict_gloss_to_id
         self.dict_sentence = dict_sentence
         self.dict_lem_to_id = dict_lem_to_id
@@ -45,21 +47,42 @@ class PhoenixVideoDataset(Dataset):
         val_list = lambda k: [d.get(k) for d in batch if d.get(k) is not None]
         return {k: val_list(k) for k in key_set}
 
+    def _read_flow_frames(self, file_name, selection):
+        """
+        Read optical flow frames from LMDB.
+
+        Flow is stored as pickled numpy arrays (NOT PIL images).
+        optical_flow_embed.py saves: txn.put(f"{i:06d}".encode(), pickle.dumps(flow))
+
+        This is fundamentally different from the video LMDB which stores JPEG frames.
+        Using LMDBUtility.get_frames() would crash with PIL.UnidentifiedImageError.
+        """
+        flow_path = f"{self.flow_lmdb_dir}/{file_name}"
+        # Open a new env per call (worker-safe, no shared state)
+        env = lmdb.open(flow_path, readonly=True, lock=False, readahead=False)
+        flows = []
+        with env.begin() as txn:
+            for i in selection:
+                raw = txn.get(f"{i:06d}".encode())
+                if raw is None:
+                    # Fallback: some videos may have one fewer flow frame
+                    # (flow has N-1 frames for N video frames, first is zeros)
+                    raw = txn.get(f"{max(0, i-1):06d}".encode())
+                if raw is None:
+                    # Zero flow as last resort
+                    flows.append(np.zeros((64, 64, 2), dtype=np.float32))
+                else:
+                    flows.append(pickle.loads(raw))
+        env.close()
+        return flows
+
     def __getitem__(self, idx):
         item = self.items[idx]
         file_name = item["name"]
 
         if not self.lmdb_util_video:
-            self.lmdb_util_video = LMDBUtility(
-                f"{self.lmdb_dir}/{file_name}",
-            )
-
+            self.lmdb_util_video = LMDBUtility(f"{self.lmdb_dir}/{file_name}")
             self.num_frames = self.lmdb_util_video.details["num_frames"]
-
-        if self.flow_lmdb_dir and not self.lmdb_util_flow:
-            self.lmdb_util_flow = LMDBUtility(
-                f"{self.flow_lmdb_dir}/{file_name}",
-            )
 
         if self.isValid:
             start_frame = 0
@@ -71,27 +94,27 @@ class PhoenixVideoDataset(Dataset):
             )
 
         selection = np.arange(start_frame, end_frame, self.transform.stride)
-
         selection = selection.astype(int)
 
         if len(selection) > self.transform.max_seq_len:
             selection = np.random.choice(
                 selection, size=self.transform.max_seq_len, replace=False
             )
-
             selection = np.sort(selection)
 
         frames = self.lmdb_util_video.get_frames(selection)
 
+        # FIX: read flow with pickle, NOT with PIL image reader
         flow_data = None
         if self.flow_lmdb_dir:
-            flow_frames = self.lmdb_util_flow.get_frames(selection)
+            flow_frames = self._read_flow_frames(file_name, selection)
             flow_data = torch.tensor(np.stack(flow_frames)).float()  # [T, H, W, 2]
 
         if self.transform:
             frames = self.transform.aug_video(frames, self.isValid)
         else:
             frames = torch.tensor(np.stack(frames)).float()
+
         sentence = item["translation"]
         glosses = item["orth"].split(" ")
         pseudo_gloss_ids = []
@@ -103,7 +126,6 @@ class PhoenixVideoDataset(Dataset):
                     for lem in lems
                     if self.dict_lem_counter[lem] / len(self.dict_sentence) < 0.4
                 ]
-                # pseudo_gloss_ids.append(self.dict_lem_to_id[lem])
 
         if self.dict_gloss_to_id:
             gloss_ids = [self.dict_gloss_to_id[gloss] for gloss in glosses]
@@ -140,14 +162,14 @@ def get_ds(ds_params, transform):
 
     if "pseudo_gloss_dir" in ds_params:
         dict_processed_words = read_pickle(ds_params["pseudo_gloss_dir"])
-
-        dict_sentence = dict_processed_words["dict_sentence"]
-        dict_lem_to_id = dict_processed_words["dict_lem_to_id"]
+        dict_sentence   = dict_processed_words["dict_sentence"]
+        dict_lem_to_id  = dict_processed_words["dict_lem_to_id"]
         dict_lem_counter = dict_processed_words["dict_lem_counter"]
     else:
-        dict_sentence = None
-        dict_lem_to_id = None
+        dict_sentence    = None
+        dict_lem_to_id   = None
         dict_lem_counter = None
+
     list_of_ds = []
     length = 0
     for gp, d in tqdm(df.groupby("name")):

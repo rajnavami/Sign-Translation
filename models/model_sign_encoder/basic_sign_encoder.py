@@ -15,11 +15,9 @@ class Model(nn.Module):
         encoder_params,
     ):
         super().__init__()
-
         spatial_mod = importlib.import_module(spatial_name, package=None)
         spatial_params["out_dim"] = encoder_params["emb_params"]["in_dim"]
         self.spatial_model = spatial_mod.Model(**spatial_params)
-
         encoder_mod = importlib.import_module(encoder_name, package=None)
         self.encoder = encoder_mod.MetaFormer(**encoder_params)
 
@@ -27,8 +25,17 @@ class Model(nn.Module):
         self,
         frame_features,
         max_len,
+        flow_data=None,     # NEW — passed from test_pretraining, forwarded to spatial_model
     ):
-        x, mask, dict_feat = self.spatial_model(frame_features, max_len=max_len)
+        # CHANGED: pass flow_data to spatial_model (dino_adaptor_model)
+        # dino_adaptor_model.forward() accepts flow_data=None and fuses it
+        # when use_flow=True and flow_data is not None
+        # When None: identical behaviour to original
+        x, mask, dict_feat = self.spatial_model(
+            frame_features,
+            flow_data=flow_data,    # NEW
+            max_len=max_len,
+        )
         enc_output = self.encoder(x, mask)
         return {
             "enc_output": enc_output,

@@ -131,7 +131,11 @@ class Model(nn.Module):
         self.bn = SafeBatchNorm1d(out_dim)
 
         if self.use_flow:
-            self.flow_branch = FlowBranch(**flow_params)
+            # Force out_dim to match spatial model output.
+            # FlowBranch default out_dim=384 but spatial model projects to
+            # out_dim (e.g. 512). They must match for GatedFusion.
+            flow_params_with_dim = {**flow_params, 'out_dim': out_dim}
+            self.flow_branch = FlowBranch(**flow_params_with_dim)
             self.fusion = GatedFusion(out_dim)
 
         if idist.get_local_rank() == 0 or idist.get_world_size() == 0:
