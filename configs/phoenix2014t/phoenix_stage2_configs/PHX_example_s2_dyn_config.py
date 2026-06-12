@@ -35,18 +35,12 @@ def get_config():
         "max_seq_len": 256,
     }
 
-    base_bs = 8    #batch
-    cfg.bs = int(
-        8
-        * torch.cuda.device_count()
-        # * ((torch.cuda.mem_get_info()[1] / 10**6) / 24000)
-    )
+    cfg.bs = int(8 * torch.cuda.device_count())
     cfg.accum = 1
     cfg.num_workers = min(min(cfg.bs, int(10 * torch.cuda.device_count())), 10)
 
     cfg.gate_grad_multiplier = 1.0
-
-    cfg.lr = 3e-4  # * (cfg.bs**0.5) / (base_bs**0.5)
+    cfg.lr = 3e-4
     cfg.lr_scheduler = "warmupwithcosine"
     cfg.lr_scheduler_params = config_dict.ConfigDict(
         {
@@ -60,14 +54,10 @@ def get_config():
 
     cfg.optimizer_name = "adamw"
     cfg.optimizer_params = config_dict.ConfigDict(
-        {
-            "lr": cfg.lr,
-            "weight_decay": 0.001,
-        }
+        {"lr": cfg.lr, "weight_decay": 0.001}
     )
 
     cfg.criterion_name = "losses.base_loss"
-
     cfg.criterion_params = config_dict.ConfigDict(
         {
             "dict_of_loss_params": {
@@ -90,7 +80,9 @@ def get_config():
 
     cfg.train_ds_name = "dataloaders.phoenix_video_dataset"
     cfg.valid_ds_name = "dataloaders.phoenix_video_dataset"
-    cfg.test_ds_name = "dataloaders.phoenix_video_dataset"
+    cfg.test_ds_name  = "dataloaders.phoenix_video_dataset"
+
+    # ── Train split ───────────────────────────────────────────────────────────
     train_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.train.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -99,6 +91,9 @@ def get_config():
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": False,
+            # NEW — flow must be loaded in Stage 2 so the flow branch
+            # receives real flow tensors during translation training
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": True,
         "num_workers": cfg.num_workers,
@@ -107,6 +102,7 @@ def get_config():
     }
     cfg.train_ds_params = config_dict.ConfigDict(train_ds_params)
 
+    # ── Validation split ──────────────────────────────────────────────────────
     valid_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.dev.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -115,6 +111,7 @@ def get_config():
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": False,
         "num_workers": cfg.num_workers,
@@ -123,6 +120,7 @@ def get_config():
     }
     cfg.valid_ds_params = config_dict.ConfigDict(valid_ds_params)
 
+    # ── Test split ────────────────────────────────────────────────────────────
     test_ds_params = {
         "csv_dir": f"{code_path}/data/phoenix2014t/PHOENIX-2014-T.test.corpus.csv",
         "pseudo_gloss_dir": f"{code_path}/data/phoenix2014t/processed_words.phx_pkl",
@@ -131,6 +129,7 @@ def get_config():
         "ds_params": {
             "lmdb_video_dir": f"{lmdb_path}/phoenix2014t/lmdb_videos",
             "isValid": True,
+            "flow_lmdb_dir": f"{lmdb_path}/phoenix2014t/lmdb_flows",
         },
         "shuffle": False,
         "num_workers": cfg.num_workers,
@@ -140,11 +139,7 @@ def get_config():
     cfg.test_ds_params = config_dict.ConfigDict(test_ds_params)
 
     cfg.lm_name = "facebook/xglm-1.7B"
-    cfg.additional_tokens = {
-        # "pad_token": "<pad>",
-        # "bos_token": ">",
-        # "eos_token": ".",
-    }
+    cfg.additional_tokens = {}
     cfg.pretext = ""
     cfg.replacement_pickle = None
 
@@ -154,59 +149,61 @@ def get_config():
     mod = importlib.import_module(cfg.stage1_name, package=None)
     stage1_config = mod.get_config()
 
-    stage1_name = stage1_config["model_name"]
-
-    stage1_params = stage1_config["model_params"].to_dict()
+    stage1_name     = stage1_config["model_name"]
+    stage1_params   = stage1_config["model_params"].to_dict()
     stage1_ckpt_dir = stage1_config["save_dir"]
     stage1_ckpt = get_best_checkpoint_details(
         stage1_ckpt_dir, best_checkpoint_name="_result_checkpoint_"
     )[0]
-    # stage1_ckpt = '/data/sign2gpt/Sign2GPT/checkpoint_signcl/phoenix_stage1_configs/PHX_example_s1_dyn_config/best_result_checkpoint_29_0.0057.pt'
     assert stage1_ckpt is not None and stage1_ckpt != ""
+
     cfg.model_name = "models.trial_models.test_stage2_model"
     cfg.model_params = {
-        "stage1_name": stage1_name,
-        "stage1_params": stage1_params,
-        "stage1_ckpt": stage1_ckpt,
-        "post_name": "models.post_models.linear_pos_head",
-        "post_params": {"pos_type": "sine", "pre_pos": True},
-        "llm_name": cfg.lm_name,
+        "stage1_name":        stage1_name,
+        "stage1_params":      stage1_params,
+        "stage1_ckpt":        stage1_ckpt,
+        "post_name":          "models.post_models.linear_pos_head",
+        "post_params":        {"pos_type": "sine", "pre_pos": True},
+        "llm_name":           cfg.lm_name,
         "lang_backbone_name": "models.huggingface.modeling_xglm",
         "adaptor_params": {
-            "adapt_layers": list(np.arange(0, 24, 1)),
-            "lora_layers": list(np.arange(0, 24, 1)),
-            "w_lora_ff": False,
-            "lora_rank": 4,
-            "lora_drop": 0.1,
-            "gate_type": "clamp",
-            "lora_a": 4.0,
-            "adapt_tokens": False,
+            "adapt_layers":  list(np.arange(0, 24, 1)),
+            "lora_layers":   list(np.arange(0, 24, 1)),
+            "w_lora_ff":     False,
+            "lora_rank":     4,
+            "lora_drop":     0.1,
+            "gate_type":     "clamp",
+            "lora_a":        4.0,
+            "adapt_tokens":  False,
         },
         "freeze": False,
     }
 
     cfg.gen_params = {"max_length": 64, "temperature": 1.0, "num_beams": 4}
 
-    # cfg.run = False  #True, to test the model
-    # cfg.load_from_ckpt = "best"
+    # IMPORTANT:
+    # cfg.run = False  → TRAINING mode   ← use this first
+    # cfg.run = True   → EVALUATION mode ← set after training to get BLEU4
+    cfg.run            = False
+    cfg.load_from_ckpt = "best"
 
-    cfg.seed = 1
-    cfg.grad_clip_norm = 1.0
+    cfg.seed            = 1
+    cfg.grad_clip_norm  = 1.0
     cfg.grad_clip_value = 1.0
-    cfg.mixup = False
-    cfg.logger_name = ["text", "tensorboard"]  # ["wandb"]
-    cfg.resume = True
-    cfg.train_length = None
-    cfg.val_length = None
-    cfg.log_every = 100
-    cfg.save_ckpt = True
-    cfg.score_factor = 1
-    cfg.score_name = "valid/obleu"
-    cfg.bfloat16_only = False
-
-    # Set to `True` to perform character BLEU for CSL-Daily, else every sentence would be treated as 1 "word"
-    # for training on other languages `apply_metric_splitter` should be set to `False`.
+    cfg.mixup           = False
+    cfg.logger_name     = ["text", "tensorboard"]
+    # Set False for first run (no Stage 2 checkpoint exists yet)
+    # Set True after first epoch saves a checkpoint
+    cfg.resume          = False
+    cfg.train_length    = None
+    cfg.val_length      = None
+    cfg.log_every       = 100
+    cfg.save_ckpt       = True
+    cfg.score_factor    = 1
+    cfg.score_name      = "valid/obleu"
+    cfg.bfloat16_only   = False
     cfg.apply_metric_splitter = False
-    cfg.append_string = ""
-    cfg.watch_grad = True
+    cfg.append_string   = ""
+    cfg.watch_grad      = True
+
     return cfg
