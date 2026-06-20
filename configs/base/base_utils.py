@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def get_checkpoint_path(base_name, name):
-    ckpt_path = "checkpoint"
+    ckpt_path = "checkpoint_dinov2_optical_flow_rank4_all_layers"
     return ckpt_path
 
 
