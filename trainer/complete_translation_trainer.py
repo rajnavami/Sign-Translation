@@ -25,7 +25,7 @@ class Trainer(BaseTrainer):
     def __init__(self, local_rank, *args, **kwargs):
         super().__init__(args)
         cfg = args[0]
-        if "run" in cfg:
+        if "run" in cfg and cfg.run:
             pass
         else:
             if cfg.log_name:
@@ -124,7 +124,8 @@ class Trainer(BaseTrainer):
             objects_to_load = {"model": self.model}
         self.load_checkpoints(cfg, trainer, objects_to_load=objects_to_load)
 
-        if "run" in cfg:
+        # FIX: was [if "run" in cfg] — always True even when cfg.run=False
+        if "run" in cfg and cfg.run:
             if cfg["load_from_ckpt"] == "best":
                 ckpt, _, _ = get_best_checkpoint_details(
                     cfg.save_dir, best_checkpoint_name="_result_checkpoint_"
