@@ -135,7 +135,8 @@ class Trainer(BaseTrainer):
             objects_to_load = {"model": self.model}
         self.load_checkpoints(cfg, trainer, objects_to_load=objects_to_load)
 
-        if "run" in cfg:
+        # FIX: was [if "run" in cfg] — always True even when cfg.run=False
+        if "run" in cfg and cfg.run:
             if cfg["load_from_ckpt"] == "best":
                 ckpt, _, _ = get_best_checkpoint_details(cfg.save_dir, best_checkpoint_name="best_result_")
                 self.model.load_state_dict(torch.load(ckpt, map_location="cpu")["model"])
