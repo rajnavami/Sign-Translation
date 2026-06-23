@@ -4,29 +4,37 @@ import glob
 
 
 def get_best_checkpoint_details(
-    path, extension="pt", best_checkpoint_name="_result_checkpoint_"
+    path, extension="pt", best_checkpoint_name="best_result_"
 ):
     list_of_checkpoints = list(Path(path).glob(f"*.{extension}"))
     print(list_of_checkpoints)
-    max_score = -100
+    max_score = -float("inf")
+    best_checkpoint = None
+    best_epoch = None
+    best_score = None
     for pt in list_of_checkpoints:
         path_cpkt = str(pt).split(best_checkpoint_name)
         if len(path_cpkt) <= 1:
             continue
-        path_cpkt = path_cpkt[1].split("_")
-        epoch = path_cpkt[0]
-        score = float(path_cpkt[-1].split(f".{extension}")[0])
-        if max_score < score:
+        suffix = path_cpkt[1].rsplit(f".{extension}", 1)[0]
+        parts = suffix.split("_")
+        if len(parts) < 2:
+            continue
+        epoch = parts[0]
+        try:
+            score = float(parts[-1])
+        except ValueError:
+            continue
+        if score > max_score:
             best_checkpoint = pt
             best_epoch = epoch
             best_score = score
             max_score = score
-    try:
+    if best_checkpoint is not None:
         print(best_checkpoint, best_epoch, best_score)
         return str(best_checkpoint), best_epoch, best_score
-    except:
-        print("NO CHECKPOINT FOUND")
-        return "", 0, 0
+    print("NO CHECKPOINT FOUND")
+    return "", 0, 0
 
 
 def get_latest_saved_file(folder, extension="pt", name_latest="latest"):

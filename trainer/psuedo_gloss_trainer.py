@@ -137,7 +137,7 @@ class Trainer(BaseTrainer):
 
         if "run" in cfg:
             if cfg["load_from_ckpt"] == "best":
-                ckpt, _, _ = get_best_checkpoint_details(cfg.save_dir, best_checkpoint_name="_result_checkpoint_")
+                ckpt, _, _ = get_best_checkpoint_details(cfg.save_dir, best_checkpoint_name="best_result_")
                 self.model.load_state_dict(torch.load(ckpt, map_location="cpu")["model"])
             elif cfg["load_from_ckpt"] == "latest":
                 ckpt, _, _ = get_latest_saved_file(cfg.save_dir, extension="pt", name_latest="latest_epoch")

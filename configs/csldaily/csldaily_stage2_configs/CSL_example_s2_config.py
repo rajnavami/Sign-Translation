@@ -152,7 +152,7 @@ def get_config():
 
     stage1_params = stage1_config["model_params"].to_dict()
     stage1_ckpt_dir = stage1_config["save_dir"]
-    stage1_ckpt = get_best_checkpoint_details(stage1_ckpt_dir, best_checkpoint_name="_result_checkpoint_")[0]
+    stage1_ckpt = get_best_checkpoint_details(stage1_ckpt_dir, best_checkpoint_name="best_result_")[0]
     assert stage1_ckpt is not None and stage1_ckpt != ""
     cfg.model_name = "models.trial_models.test_stage2_model"
     cfg.model_params = {
