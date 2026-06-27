@@ -115,7 +115,7 @@ class Model(nn.Module):
         adapt_params={},
         out_dim=None,
         freeze=False,
-        use_flow=False,
+        use_flow=True,
         flow_params={}
     ):
         super().__init__()
