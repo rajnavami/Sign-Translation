@@ -74,9 +74,10 @@ def compute_flow_for_video(args):
         else:
             flow_frames = [np.zeros((64, 64, 2), dtype=np.float32)]
 
-        # Save to LMDB
+        # Save to LMDB with a conservative map size to avoid memory errors
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        env = lmdb.open(output_path, map_size=1e9)
+        map_size = max(2 * 1024 * 1024, len(flow_frames) * 64 * 64 * 2 * 4 * 2)
+        env = lmdb.open(output_path, map_size=map_size)
         with env.begin(write=True) as txn:
             for i, flow in enumerate(flow_frames):
                 flow_bytes = pickle.dumps(flow.astype(np.float32))
@@ -103,7 +104,7 @@ if __name__ == "__main__":
 
     tasks = [(args.video_lmdb_dir, args.flow_lmdb_dir, vn) for vn in video_names]
 
-    with Pool(args.num_workers) as pool:
+    with Pool(processes=min(args.num_workers, 2)) as pool:
         results = list(tqdm(pool.imap(compute_flow_for_video, tasks), total=len(tasks)))
 
     for r in results:
