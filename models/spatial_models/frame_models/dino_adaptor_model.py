@@ -91,6 +91,11 @@ class GatedFusion(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.gate = nn.Linear(dim * 2, dim)
+        nn.init.zeros_(self.gate.weight)
+        # Initialize the gate to strongly favor the RGB branch at startup.
+        # This preserves the pretrained DINOv2 features and prevents the
+        # freshly initialized flow branch from overwhelming the model.
+        nn.init.constant_(self.gate.bias, 4.0)
         self.act = nn.Sigmoid()
 
     def forward(self, rgb_feat, flow_feat):
